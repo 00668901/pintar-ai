@@ -9,7 +9,7 @@ import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import { Sidebar } from '../components/Sidebar';
 import { ChatBubble } from '../components/ChatBubble';
-import { SendIcon, MenuIcon, PhotoIcon, TrashIcon, ClearIcon, PlusIcon, BookIcon, SortIcon, SearchIcon, FileIcon, CloseIcon, CheckIcon, SparklesIcon, ReloadIcon, CloudIcon, GoogleDriveIcon, DropboxIcon, MicIcon, StopIcon, VideoIcon } from '../components/Icons';
+import { SendIcon, MenuIcon, PhotoIcon, TrashIcon, ClearIcon, PlusIcon, BookIcon, SortIcon, SearchIcon, FileIcon, CloseIcon, CheckIcon, SparklesIcon, ReloadIcon, CloudIcon, GoogleDriveIcon, DropboxIcon, MicIcon, StopIcon, VideoIcon, SettingsIcon, KeyIcon } from '../components/Icons';
 import { Message, LearningMode, VisionFile, ChatSession, AppView, Note, QuizQuestion, User } from '../types';
 import { streamGeminiResponse, generateNoteSummary, regenerateQuiz } from '../services/geminiService';
 import { db } from '../services/db';
@@ -41,6 +41,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   // App State
   const [view, setView] = useState<AppView>('chat');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
 
   // Chat State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -79,7 +81,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   const noteFileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  // --- Persistence (IndexedDB) ---
+  // --- Persistence & Init ---
   useEffect(() => {
     const loadData = async () => {
         try {
@@ -92,7 +94,40 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         }
     };
     loadData();
+
+    // Check for API Key
+    const localKey = localStorage.getItem('gemini_api_key');
+    if (localKey) setApiKeyInput(localKey);
   }, []);
+
+  const handleSaveApiKey = () => {
+      if (apiKeyInput.trim()) {
+          localStorage.setItem('gemini_api_key', apiKeyInput.trim());
+      } else {
+          localStorage.removeItem('gemini_api_key');
+      }
+      setShowSettings(false);
+      alert("API Key berhasil disimpan!");
+      window.location.reload(); // Reload to ensure services pick up the new key
+  };
+
+  // --- Calculate Token Usage ---
+  const totalTokenUsage = useMemo(() => {
+      // Calculate from current visible messages
+      const currentSessionUsage = messages.reduce((acc, msg) => acc + (msg.usage?.totalTokens || 0), 0);
+      
+      // We could also calculate from all sessions if we loaded them all fully, 
+      // but typically we just want to track the current active usage + what we know.
+      // For a simple counter, let's sum up tokens from all sessions we have loaded in state.
+      // Note: This is client-side only tracking.
+      let allSessionsUsage = sessions.reduce((acc, session) => {
+           // Avoid double counting current session if it's already in the sessions list
+           if (session.id === currentSessionId) return acc;
+           return acc + session.messages.reduce((mAcc, msg) => mAcc + (msg.usage?.totalTokens || 0), 0);
+      }, 0);
+
+      return allSessionsUsage + currentSessionUsage;
+  }, [messages, sessions, currentSessionId]);
 
   // --- Chat Logic ---
 
@@ -186,7 +221,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
           }
       } catch (error) {
           console.error("Quiz creation error:", error);
-          alert("Terjadi kesalahan saat menghubungi AI.");
+          alert("Terjadi kesalahan saat menghubungi AI. Pastikan API Key valid.");
       } finally {
           setIsCreatingQuiz(false);
       }
@@ -637,6 +672,59 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   return (
     <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden relative transition-colors duration-300">
       
+      {/* Settings Modal */}
+      {showSettings && (
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+             <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-100 dark:border-slate-800 relative">
+                 <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"><CloseIcon /></button>
+                 
+                 <div className="flex flex-col items-center text-center mb-6">
+                     <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full flex items-center justify-center mb-3">
+                        <SettingsIcon />
+                     </div>
+                     <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Pengaturan API Key</h3>
+                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        Masukkan Google Gemini API Key Anda agar aplikasi dapat berjalan tanpa batasan.
+                     </p>
+                 </div>
+                 
+                 <div className="space-y-4">
+                     <div>
+                         <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2 ml-1">Gemini API Key</label>
+                         <div className="relative">
+                             <div className="absolute left-3 top-3 text-slate-400">
+                                 <KeyIcon />
+                             </div>
+                             <input 
+                                type="password" 
+                                value={apiKeyInput}
+                                onChange={(e) => setApiKeyInput(e.target.value)}
+                                placeholder="tempel AIzaSy..."
+                                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none text-slate-800 dark:text-slate-200 text-sm"
+                             />
+                         </div>
+                         <p className="text-xs text-slate-400 mt-2 px-1">
+                             Key ini disimpan secara lokal di browser Anda (LocalStorage) dan tidak dikirim ke server manapun selain Google.
+                         </p>
+                     </div>
+                     
+                     <button 
+                        onClick={handleSaveApiKey}
+                        className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-200 dark:shadow-none transition-all active:scale-95"
+                     >
+                        Simpan Pengaturan
+                     </button>
+                     
+                     <div className="text-center pt-2">
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-xs text-primary-600 dark:text-primary-400 hover:underline">
+                            Dapatkan API Key di sini &rarr;
+                        </a>
+                     </div>
+                 </div>
+             </div>
+         </div>
+      )}
+
       {/* Delete Confirmation Modal */}
       {deleteModal.isOpen && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
@@ -688,6 +776,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         onSignOut={onSignOut}
         theme={theme}
         toggleTheme={toggleTheme}
+        onOpenSettings={() => setShowSettings(true)}
+        totalTokenUsage={totalTokenUsage}
       />
 
       {/* Main Area */}

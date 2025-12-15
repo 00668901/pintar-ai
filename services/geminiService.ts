@@ -3,19 +3,36 @@ import { Message, LearningMode, VisionFile, QuizQuestion } from "../types";
 // @ts-ignore
 import JSON5 from "json5";
 
-// Initialize Gemini Client Safely
-// This prevents the app from crashing (white screen) if the API key is not yet set in Vercel.
-let ai: GoogleGenAI | null = null;
-try {
-    const apiKey = process.env.API_KEY;
-    if (apiKey && apiKey.length > 0 && apiKey !== 'undefined') {
-        ai = new GoogleGenAI({ apiKey });
-    } else {
-        console.warn("PintarAI: API Key belum ditemukan. Fitur AI tidak akan berjalan sampai API Key di-set di Vercel.");
+// Helper to get the API Key safely
+// Priority: 
+// 1. LocalStorage (User entered key in Settings)
+// 2. Vite Environment Variable (VITE_API_KEY)
+// 3. Process Env (API_KEY) - Legacy/Vercel
+const getApiKey = (): string | null => {
+    const localKey = localStorage.getItem('gemini_api_key');
+    if (localKey && localKey.trim().length > 0) return localKey;
+
+    // Check Vite Env
+    // @ts-ignore
+    if (import.meta.env && import.meta.env.VITE_API_KEY) {
+        // @ts-ignore
+        return import.meta.env.VITE_API_KEY;
     }
-} catch (error) {
-    console.error("Failed to initialize Gemini Client:", error);
-}
+
+    // Check Process Env (Legacy)
+    if (process.env.API_KEY && process.env.API_KEY !== 'undefined') {
+        return process.env.API_KEY;
+    }
+
+    return null;
+};
+
+// Helper to get initialized AI Client
+const getAIClient = (): GoogleGenAI | null => {
+    const apiKey = getApiKey();
+    if (!apiKey) return null;
+    return new GoogleGenAI({ apiKey });
+};
 
 const getSystemInstruction = (mode: LearningMode): string => {
   const base = "Kamu adalah PintarAI, asisten belajar yang cerdas, ramah, dan sangat membantu untuk siswa di Indonesia. Gunakan Bahasa Indonesia yang formal namun santai. Gunakan Markdown yang rapi.";
@@ -53,9 +70,11 @@ export const streamGeminiResponse = async (
   onChunk: (text: string) => void,
   onFinish?: (usage: { promptTokens: number; responseTokens: number; totalTokens: number }) => void
 ) => {
+  const ai = getAIClient();
+  
   // Check if AI is initialized
   if (!ai) {
-      onChunk("⚠️ **Sistem Error**: API Key belum dikonfigurasi.\n\nMohon buka Dashboard Vercel project ini, lalu masuk ke **Settings > Environment Variables**, dan tambahkan key `API_KEY` dengan API Key Google AI Studio anda. Jangan lupa redeploy!");
+      onChunk("⚠️ **Konfigurasi Diperlukan**: API Key belum ditemukan.\n\nSilakan klik tombol **Pengaturan (⚙️)** di pojok kiri bawah sidebar dan masukkan Google Gemini API Key Anda agar aplikasi dapat berjalan.");
       return;
   }
 
@@ -121,9 +140,13 @@ export const streamGeminiResponse = async (
         });
       }
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    onChunk("\n\n*Maaf, terjadi kesalahan saat menghubungi server AI. Mohon cek koneksi atau API Key Anda.*");
+    let errorMsg = "\n\n*Maaf, terjadi kesalahan saat menghubungi server AI.*";
+    if (error.message && error.message.includes("API key not valid")) {
+        errorMsg = "\n\n⚠️ **API Key Tidak Valid**: Mohon cek kembali API Key di menu Pengaturan.";
+    }
+    onChunk(errorMsg);
   }
 };
 
@@ -132,10 +155,12 @@ export const generateNoteSummary = async (
   images: VisionFile[],
   contextText: string = ""
 ): Promise<{ title: string, content: string, quiz: QuizQuestion[] }> => {
+  const ai = getAIClient();
+
   if (!ai) {
       return {
           title: "Error Konfigurasi",
-          content: "API Key belum di-setting di Vercel. Mohon tambahkan Environment Variable `API_KEY`.",
+          content: "API Key belum di-setting. Mohon masukkan API Key di menu Pengaturan (ikon Gear).",
           quiz: []
       };
   }
@@ -229,6 +254,7 @@ export const generateNoteSummary = async (
 export const regenerateQuiz = async (
   content: string
 ): Promise<QuizQuestion[]> => {
+  const ai = getAIClient();
   if (!ai) return [];
 
   const model = "gemini-2.5-flash";

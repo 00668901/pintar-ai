@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { SparklesIcon, SunIcon, MoonIcon } from '../components/Icons';
-import { renderGoogleButton, initGoogleAuth } from '../services/authService';
 import { User } from '../types';
 
 interface LandingProps {
@@ -10,16 +9,8 @@ interface LandingProps {
   toggleTheme: () => void;
 }
 
-export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, toggleTheme }) => {
+export const Landing: React.FC<LandingProps> = ({ onStart, theme, toggleTheme }) => {
   
-  useEffect(() => {
-      // Initialize auth with the sign-in callback specific to Landing
-      // The robust service handles script loading and race conditions
-      initGoogleAuth(onSignIn);
-      renderGoogleButton("google-btn-container");
-      renderGoogleButton("google-btn-container-mobile");
-  }, [onSignIn]);
-
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
       {/* Navbar */}
@@ -34,14 +25,6 @@ export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, togg
                 className="p-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
             >
                 {theme === 'light' ? <MoonIcon /> : <SunIcon />}
-            </button>
-            <div id="google-btn-container" className="hidden md:block min-h-[40px] min-w-[200px]"></div>
-            {/* Fallback button if GSI fails or user wants to skip */}
-            <button 
-            onClick={onStart}
-            className="text-slate-600 dark:text-slate-300 font-medium hover:text-primary-600 dark:hover:text-primary-400 transition-colors md:hidden"
-            >
-            Masuk
             </button>
         </div>
       </nav>
@@ -67,13 +50,9 @@ export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, togg
             onClick={onStart}
             className="group relative inline-flex items-center justify-center px-8 py-4 font-semibold text-white transition-all duration-200 bg-primary-600 rounded-full hover:bg-primary-700 hover:scale-105 focus:outline-none ring-offset-2 focus:ring-2 shadow-xl shadow-primary-200 dark:shadow-none"
             >
-            Mulai Belajar Sekarang (Tanpa Login)
+            Mulai Belajar Sekarang
             <svg className="w-5 h-5 ml-2 -mr-1 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
             </button>
-            
-            <div className="md:hidden mt-4">
-                <div id="google-btn-container-mobile" className="min-h-[40px]"></div>
-            </div>
         </div>
 
         {/* Features Grid */}

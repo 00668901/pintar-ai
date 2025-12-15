@@ -1,7 +1,6 @@
 import React from 'react';
 import { LearningMode, ChatSession, AppView, User } from '../types';
-import { SparklesIcon, CloseIcon, ChatIcon, BookIcon, HistoryIcon, TrashIcon, SunIcon, MoonIcon, GoogleIcon } from './Icons';
-import { renderGoogleButton, initGoogleAuth } from '../services/authService';
+import { SparklesIcon, CloseIcon, ChatIcon, BookIcon, HistoryIcon, TrashIcon, SunIcon, MoonIcon, SettingsIcon } from './Icons';
 
 interface SidebarProps {
   currentMode: LearningMode;
@@ -19,6 +18,8 @@ interface SidebarProps {
   onSignOut: () => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
+  onOpenSettings: () => void;
+  totalTokenUsage: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -36,29 +37,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   onSignOut,
   theme,
-  toggleTheme
+  toggleTheme,
+  onOpenSettings,
+  totalTokenUsage
 }) => {
   const modes = Object.values(LearningMode);
-
-  // Render Google button if user is not logged in and sidebar is open
-  React.useEffect(() => {
-    if (isOpen && !user) {
-        // Initialize implicitly here to ensure button works if app was loaded directly to chat
-        // Note: In a real app, you might want to pass the login callback from props to Sidebar
-        // For now, assume global auth state handling in App.tsx will pick up the cookie/session if any,
-        // but for the button to work, it needs initialization.
-        // We re-use initGoogleAuth but we need a callback. 
-        // Since Sidebar doesn't have setHasStarted/setUser directly passed for *new* logins 
-        // (App.tsx handles it via its own init), we rely on App.tsx's init to have set the callback globally?
-        // No, google.accounts.id.initialize saves the callback.
-        // If Sidebar calls init, it might overwrite App's callback if we pass one.
-        // If we don't call init, renderButton might fail if App hasn't init yet (unlikely in ChatApp view).
-        // Safest: Just call renderButton. The robust service in App.tsx/Landing.tsx should have initialized it.
-        // But if user refreshed on /chat, App.tsx init runs.
-        
-        renderGoogleButton("sidebar-google-btn");
-    }
-  }, [isOpen, user]);
 
   return (
     <>
@@ -84,25 +67,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
              </button>
           </div>
 
-          {/* User Profile Section */}
+          {/* User Profile Section (GUEST MODE) */}
           <div className="px-4 py-4 border-b border-slate-100 dark:border-slate-800">
-              {user ? (
-                  <div className="flex items-center gap-3">
-                      <img src={user.picture} alt={user.name} className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-700" />
-                      <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{user.name}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
-                      </div>
-                      <button onClick={onSignOut} className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 font-medium">
-                          Keluar
-                      </button>
+              <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xl">
+                      👤
                   </div>
-              ) : (
-                  <div className="flex flex-col gap-2">
-                      <p className="text-xs text-slate-500 dark:text-slate-400 text-center mb-1">Masuk untuk simpan progress</p>
-                      <div id="sidebar-google-btn" className="flex justify-center min-h-[40px]"></div>
+                  <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">Tamu</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">Mode Lokal</p>
                   </div>
-              )}
+                  <button onClick={onSignOut} className="text-xs text-slate-400 hover:text-red-500 dark:hover:text-red-400" title="Ke Halaman Utama">
+                      <CloseIcon />
+                  </button>
+              </div>
           </div>
 
           {/* Main Navigation Tabs */}
@@ -208,10 +186,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Footer Info */}
-          <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <button 
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
+             <div className="flex items-center justify-between mb-4">
+                 <div className="flex flex-col">
+                     <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Penggunaan Token</span>
+                     <span className="text-sm font-mono font-bold text-slate-700 dark:text-slate-300">{totalTokenUsage.toLocaleString()}</span>
+                 </div>
+                 <button 
+                    onClick={onOpenSettings}
+                    className="p-2 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-primary-600 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
+                    title="Pengaturan API Key"
+                 >
+                     <SettingsIcon />
+                 </button>
+             </div>
+             
+             <button 
                 onClick={toggleTheme}
-                className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                className="w-full flex items-center justify-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors py-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
             >
                 {theme === 'light' ? <MoonIcon /> : <SunIcon />}
                 <span>{theme === 'light' ? 'Mode Gelap' : 'Mode Terang'}</span>
