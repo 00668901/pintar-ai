@@ -187,19 +187,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Footer Info */}
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
-             <div className="flex items-center justify-between mb-4">
-                 <div className="flex flex-col">
-                     <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Penggunaan Token</span>
-                     <span className="text-sm font-mono font-bold text-slate-700 dark:text-slate-300">{totalTokenUsage.toLocaleString()}</span>
-                 </div>
-                 <button 
-                    onClick={onOpenSettings}
-                    className="p-2 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-primary-600 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
-                    title="Pengaturan API Key"
-                 >
-                     <SettingsIcon />
-                 </button>
-             </div>
+             {/* API Key & Token Usage Hidden by User Request */}
              
              <button 
                 onClick={toggleTheme}
