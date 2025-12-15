@@ -1,0 +1,8 @@
+{
+  "name": "PintarAI - Asisten Belajar Cerdas",
+  "description": "Platform belajar pintar yang terinspirasi dari pelajarin.ai. Membantu siswa mengerjakan soal, memahami materi, dan belajar lebih efektif dengan AI.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

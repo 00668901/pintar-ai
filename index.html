@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PintarAI - Teman Belajar Kamu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Plus Jakarta Sans', 'sans-serif'],
+            },
+            colors: {
+              primary: {
+                50: '#f0f9ff',
+                100: '#e0f2fe',
+                500: '#0ea5e9',
+                600: '#0284c7',
+                700: '#0369a1',
+              }
+            },
+            animation: {
+              'bounce-slow': 'bounce 3s infinite',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        cursor: default;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8; 
+      }
+      
+      /* Dark mode scrollbar */
+      .dark ::-webkit-scrollbar-thumb {
+        background: #475569;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #64748b;
+      }
+      
+      /* Utilities */
+      .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+      }
+      .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+      
+      /* New Wave Loading Animation */
+      .loading-wave {
+        width: 30px;
+        height: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+      
+      .loading-bar {
+        width: 4px;
+        height: 10px;
+        background-color: #0ea5e9;
+        border-radius: 2px;
+        animation: loading-wave-animation 1s ease-in-out infinite;
+      }
+      
+      .loading-bar:nth-child(1) { animation-delay: 0.0s; }
+      .loading-bar:nth-child(2) { animation-delay: 0.1s; }
+      .loading-bar:nth-child(3) { animation-delay: 0.2s; }
+      .loading-bar:nth-child(4) { animation-delay: 0.3s; }
+      
+      @keyframes loading-wave-animation {
+        0% { height: 10px; opacity: 0.5; }
+        50% { height: 25px; opacity: 1; }
+        100% { height: 10px; opacity: 0.5; }
+      }
+
+      /* Search Highlight */
+      mark.search-highlight {
+        background-color: #fde047; /* Yellow-300 */
+        color: #1e293b;
+        padding: 0 2px;
+        border-radius: 2px;
+        font-weight: 500;
+      }
+
+      /* Markdown Styles - Enhanced for Readability */
+      .markdown-body {
+        font-size: 1rem;
+        color: #334155;
+        overflow-wrap: break-word; /* Prevents horizontal overflow */
+        word-break: break-word;
+      }
+      .dark .markdown-body {
+        color: #e2e8f0;
+      }
+
+      .markdown-body p { margin-bottom: 1.25rem; line-height: 1.8; color: #475569; }
+      .dark .markdown-body p { color: #cbd5e1; }
+
+      .markdown-body ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.25rem; }
+      .markdown-body ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1.25rem; }
+      .markdown-body li { margin-bottom: 0.5rem; }
+      .markdown-body li > p { margin-bottom: 0.5rem; }
+      
+      .markdown-body pre { 
+        background: #1e293b; 
+        color: #e2e8f0; 
+        padding: 1.25rem; 
+        border-radius: 0.75rem; 
+        overflow-x: auto; 
+        margin-bottom: 1.5rem;
+        border: 1px solid #334155;
+      }
+      .dark .markdown-body pre {
+        background: #0f172a;
+        border-color: #1e293b;
+      }
+      
+      .markdown-body code { 
+        font-family: monospace; 
+        background: #f1f5f9; 
+        color: #0f172a; 
+        padding: 0.2rem 0.4rem; 
+        border-radius: 0.25rem; 
+        font-size: 0.9em; 
+        border: 1px solid #e2e8f0;
+      }
+      .dark .markdown-body code {
+        background: #334155;
+        color: #f1f5f9;
+        border-color: #475569;
+      }
+
+      .markdown-body pre code { background: transparent; padding: 0; color: inherit; border: none; }
+      
+      .markdown-body h1 { font-size: 2rem; font-weight: 800; margin-top: 2.5rem; margin-bottom: 1.5rem; color: #0f172a; letter-spacing: -0.025em; line-height: 1.2; }
+      .dark .markdown-body h1 { color: #f8fafc; }
+
+      .markdown-body h2 { font-size: 1.5rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; letter-spacing: -0.01em; }
+      .dark .markdown-body h2 { color: #f1f5f9; border-color: #334155; }
+
+      .markdown-body h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #334155; }
+      .dark .markdown-body h3 { color: #e2e8f0; }
+
+      .markdown-body h4 { font-size: 1.1rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #475569; }
+      .dark .markdown-body h4 { color: #cbd5e1; }
+      
+      .markdown-body blockquote { 
+        border-left: 4px solid #0ea5e9; 
+        background-color: #f8fafc;
+        padding: 1rem 1.5rem; 
+        color: #64748b; 
+        margin-bottom: 1.5rem; 
+        font-style: italic; 
+        border-radius: 0 0.5rem 0.5rem 0;
+      }
+      .dark .markdown-body blockquote {
+        background-color: #1e293b;
+        color: #94a3b8;
+      }
+
+      .markdown-body img {
+        border-radius: 0.75rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        max-width: 100%;
+        margin: 1.5rem 0;
+      }
+
+      /* Tables */
+      .markdown-body table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1.5rem;
+        overflow-x: auto;
+        display: block; /* Enables scroll for small screens */
+      }
+      .markdown-body th {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+        text-align: left;
+        color: #334155;
+      }
+      .dark .markdown-body th {
+        background-color: #1e293b;
+        border-color: #334155;
+        color: #e2e8f0;
+      }
+
+      .markdown-body td {
+        border: 1px solid #e2e8f0;
+        padding: 0.75rem 1rem;
+        color: #475569;
+      }
+      .dark .markdown-body td {
+        border-color: #334155;
+        color: #cbd5e1;
+      }
+      
+      /* KaTeX Adjustments */
+      .katex-display { margin: 1.5em 0; overflow-x: auto; overflow-y: hidden; }
+      .dark .katex { color: #e2e8f0; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
+    "react-markdown": "https://esm.sh/react-markdown@9.0.1?bundle",
+    "remark-gfm": "https://esm.sh/remark-gfm@4.0.0?bundle",
+    "rehype-katex": "https://esm.sh/rehype-katex@7.0.0?bundle",
+    "remark-math": "https://esm.sh/remark-math@6.0.0?bundle",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "mammoth": "https://esm.sh/mammoth@1.8.0",
+    "jszip": "https://esm.sh/jszip@3.10.1",
+    "json5": "https://esm.sh/json5@2.2.3",
+    "idb": "https://esm.sh/idb@8.0.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-primary-100 selection:text-primary-700 dark:bg-slate-950 dark:text-slate-100 dark:selection:bg-primary-900 dark:selection:text-primary-300">
+    <div id="root"></div>
+  </body>
+</html>
