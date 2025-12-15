@@ -43,6 +43,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   // Chat State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -115,19 +116,39 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   const totalTokenUsage = useMemo(() => {
       // Calculate from current visible messages
       const currentSessionUsage = messages.reduce((acc, msg) => acc + (msg.usage?.totalTokens || 0), 0);
-      
-      // We could also calculate from all sessions if we loaded them all fully, 
-      // but typically we just want to track the current active usage + what we know.
-      // For a simple counter, let's sum up tokens from all sessions we have loaded in state.
-      // Note: This is client-side only tracking.
       let allSessionsUsage = sessions.reduce((acc, session) => {
-           // Avoid double counting current session if it's already in the sessions list
            if (session.id === currentSessionId) return acc;
            return acc + session.messages.reduce((mAcc, msg) => mAcc + (msg.usage?.totalTokens || 0), 0);
       }, 0);
 
       return allSessionsUsage + currentSessionUsage;
   }, [messages, sessions, currentSessionId]);
+
+  // --- Drag and Drop Handlers ---
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragging(false);
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    if (view === 'chat') {
+        processFileSelection(files);
+    } else if (view === 'notes') {
+        processNoteCreation(files);
+    }
+  };
 
   // --- Chat Logic ---
 
@@ -234,11 +255,11 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   };
 
   const isDocxFile = (file: File) => {
-    return file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    return file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.toLowerCase().endsWith('.docx');
   };
   
   const isPptxFile = (file: File) => {
-    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.toLowerCase().endsWith('.pptx');
   };
 
   const isLegacyBinaryFile = (file: File) => {
@@ -538,13 +559,12 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
        handleDeleteNote(id, title);
   };
 
-  const handleCreateNote = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawFiles = Array.from(e.target.files || []) as File[];
+  // Shared Logic for processing files for Notes (used by Input & Drop)
+  const processNoteFiles = async (rawFiles: File[]) => {
     const visualFiles = rawFiles.filter(isVisualFile);
     const textFiles = rawFiles.filter(f => isDocxFile(f) || isPptxFile(f));
     
     if (visualFiles.length === 0 && textFiles.length === 0) {
-        if (noteFileInputRef.current) noteFileInputRef.current.value = '';
         return;
     }
 
@@ -603,7 +623,18 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     setIsCreatingNote(false);
     setSelectedNote(newNote);
     setView('note-detail');
+    
+    // Cleanup input
     if (noteFileInputRef.current) noteFileInputRef.current.value = '';
+  };
+
+  const handleCreateNote = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const rawFiles = Array.from(e.target.files || []) as File[];
+      processNoteFiles(rawFiles);
+  };
+  
+  const processNoteCreation = (files: File[]) => {
+      processNoteFiles(files);
   };
 
   const deleteNote = (id: string, e: React.MouseEvent, title: string) => {
@@ -670,8 +701,28 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   }
 
   return (
-    <div className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden relative transition-colors duration-300">
+    <div 
+        className="flex h-screen bg-white dark:bg-slate-950 overflow-hidden relative transition-colors duration-300"
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+    >
       
+      {/* Drag Overlay */}
+      {isDragging && (
+          <div className="absolute inset-0 z-50 bg-primary-500/10 backdrop-blur-sm border-4 border-primary-500/50 border-dashed m-4 rounded-3xl flex items-center justify-center pointer-events-none animate-pulse">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl shadow-xl flex flex-col items-center">
+                  <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full flex items-center justify-center mb-4">
+                      <CloudIcon />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Lepaskan File Disini</h3>
+                  <p className="text-slate-500 dark:text-slate-400 mt-2">
+                      {view === 'chat' ? 'Upload gambar atau dokumen (PDF, Word, PPT) ke chat' : 'Buat catatan baru dari dokumen'}
+                  </p>
+              </div>
+          </div>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
