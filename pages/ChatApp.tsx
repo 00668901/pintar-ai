@@ -255,7 +255,11 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   };
 
   const isDocxFile = (file: File) => {
-    return file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.toLowerCase().endsWith('.docx');
+    const name = file.name.toLowerCase();
+    const type = file.type;
+    // Strict exclusion of MS Word binary type and .doc extension to prevent Mammoth errors
+    if (type === 'application/msword' || name.endsWith('.doc')) return false;
+    return type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx');
   };
   
   const isPptxFile = (file: File) => {
@@ -273,52 +277,39 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     );
   };
   
-  // Checks for any supported text document type
   const isTextDocument = (file: File) => {
       return isDocxFile(file) || isPptxFile(file) || isLegacyBinaryFile(file);
   };
 
-  // Fallback string extractor for binary files (.doc, .ppt)
-  // This extracts printable characters, ignoring binary noise.
+  // Robust Binary Extractor using TextDecoder
   const extractTextFromBinary = async (file: File): Promise<string> => {
       try {
           const buffer = await file.arrayBuffer();
-          const view = new Uint8Array(buffer);
-          let result = "";
-          let currentString = "";
+          const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+          const text = decoder.decode(buffer);
           
-          // Heuristic: Scan for printable ASCII (32-126) and some formatting chars
-          for (let i = 0; i < view.length; i++) {
-              const code = view[i];
-              const isPrintable = (code >= 32 && code <= 126) || code === 10 || code === 13 || code === 9;
-              
-              if (isPrintable) {
-                  currentString += String.fromCharCode(code);
-              } else {
-                  // If we have a sequence longer than 4 chars, treat it as text
-                  // This filters out short binary noise sequences that happen to be in ASCII range
-                  if (currentString.length > 4) {
-                      result += currentString + " ";
-                  }
-                  currentString = "";
-              }
-          }
-          // Catch trailing
-          if (currentString.length > 4) {
-              result += currentString;
-          }
+          // Regex to find sequences of printable characters (length > 4)
+          // Filters out common binary garbage using a whitelist of printable chars
+          const matches = text.match(/[A-Za-z0-9\s.,?!@#$%^&*()_\-+=[\]{}|\\:;"'<>/]{4,}/g);
           
-          return result.trim();
+          if (matches && matches.length > 0) {
+              return matches.join(' ');
+          }
+          return "";
       } catch (e) {
           console.error("Binary extraction failed", e);
           return "";
       }
   };
 
+  // Robust PPTX Extractor
   const extractTextFromPptx = async (file: File): Promise<string> => {
     try {
-        const zip = await JSZip.loadAsync(file);
-        const slideFiles = Object.keys(zip.files).filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'));
+        const zip = new JSZip();
+        await zip.loadAsync(file);
+        
+        // More flexible regex to find slides
+        const slideFiles = Object.keys(zip.files).filter(name => name.includes('ppt/slides/slide'));
         slideFiles.sort((a: string, b: string) => {
             const numA = parseInt(a.match(/slide(\d+)\.xml/)?.[1] || '0');
             const numB = parseInt(b.match(/slide(\d+)\.xml/)?.[1] || '0');
@@ -330,19 +321,24 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
             const content = await zip.files[slideFile].async('string');
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(content, "text/xml");
-            const texts = xmlDoc.getElementsByTagName("a:t");
+            
+            const allElements = xmlDoc.getElementsByTagName("*");
             let slideText = "";
-            for (let i = 0; i < texts.length; i++) {
-                slideText += texts[i].textContent + " ";
+            for (let i = 0; i < allElements.length; i++) {
+                if (allElements[i].localName === 't') {
+                    slideText += allElements[i].textContent + " ";
+                }
             }
+
             if (slideText.trim()) {
-                fullText += `[Slide ${slideFile.replace('ppt/slides/', '').replace('.xml','')}]\n${slideText.trim()}\n\n`;
+                fullText += `[Slide ${slideFile.match(/slide(\d+)/)?.[1] || '?'}]\n${slideText.trim()}\n\n`;
             }
         }
-        return fullText;
+        return fullText || "[Presentasi kosong]";
     } catch (e) {
         console.error("PPTX Parsing Error", e);
-        throw new Error("Gagal membaca struktur file PPTX. File mungkin korup.");
+        // Fallback to binary if ZIP parsing fails
+        return await extractTextFromBinary(file);
     }
   };
 
@@ -352,19 +348,15 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     const unknownFiles: string[] = [];
 
     files.forEach(f => {
-      // Prioritize checking text documents first to classify .doc/.docx/.ppt/.pptx properly
-      // Note: isVisualFile includes PDF, but we handle PDF as visual (for Vision API).
       if (isVisualFile(f)) {
         visualFiles.push(f);
-      } else if (isTextDocument(f)) {
+      } else if (isTextDocument(f) || f.type === 'application/msword') {
         textConversionFiles.push(f);
       } else {
         unknownFiles.push(f.name);
       }
     });
 
-    // 1. Process Text Conversion FIRST (as requested)
-    // This ensures text is ready in the input box before any visual previews are rendered or uploaded.
     if (textConversionFiles.length > 0) {
       setIsLoading(true);
       for (const file of textConversionFiles) {
@@ -374,29 +366,35 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
           const footer = `\n--- Akhir Dokumen ---\n`;
 
           if (isDocxFile(file)) {
-             const arrayBuffer = await file.arrayBuffer();
-             const result = await mammoth.extractRawText({ arrayBuffer });
-             textContent = result.value;
+             try {
+                const arrayBuffer = await file.arrayBuffer();
+                const result = await mammoth.extractRawText({ arrayBuffer });
+                textContent = result.value;
+             } catch (err) {
+                 console.warn(`Mammoth failed for ${file.name}, trying binary fallback.`, err);
+                 // Fallback to binary extraction if Mammoth fails (e.g. .doc renamed to .docx, or file is corrupt)
+                 textContent = await extractTextFromBinary(file);
+             }
           } else if (isPptxFile(file)) {
              textContent = await extractTextFromPptx(file);
-          } else if (isLegacyBinaryFile(file)) {
-             // Fallback for .doc and .ppt using binary extraction
+          } else {
+             // Fallback for .doc, .ppt, and unknown types (explicitly handles msword)
              textContent = await extractTextFromBinary(file);
-             if (!textContent) {
-                 textContent = "[Gagal mengekstrak teks dari file biner. Isi mungkin kosong atau terenkripsi]";
-             }
+          }
+          
+          if (!textContent || textContent.trim().length === 0) {
+              textContent = "[Konten dokumen kosong atau tidak dapat diekstrak]";
           }
           
           setInput(prev => prev + header + textContent + footer);
         } catch (err: any) {
           console.error("File Conversion Error", err);
-          alert(`Gagal membaca file ${file.name}`);
+          alert(`Gagal membaca file ${file.name}: ${err.message}`);
         }
       }
       setIsLoading(false);
     }
 
-    // 2. Process Visual Files (Images/PDF for Vision)
     if (visualFiles.length > 0) {
       setSelectedFiles(prev => [...prev, ...visualFiles]);
       visualFiles.forEach(file => {
@@ -611,8 +609,13 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   // Shared Logic for processing files for Notes (used by Input & Drop)
   const processNoteFiles = async (rawFiles: File[]) => {
     const visualFiles = rawFiles.filter(isVisualFile);
-    // Updated filter to include all text docs
-    const textFiles = rawFiles.filter(isTextDocument);
+    // Updated filter to include all text docs, handling MS Word explicitly
+    const textFiles = [];
+    for (const f of rawFiles) {
+        if (isTextDocument(f) || f.type === 'application/msword') {
+            textFiles.push(f);
+        }
+    }
     
     if (visualFiles.length === 0 && textFiles.length === 0) {
         return;
@@ -628,19 +631,31 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
             try {
                 let extracted = "";
                 if (isDocxFile(file)) {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const result = await mammoth.extractRawText({ arrayBuffer });
-                    extracted = result.value;
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const result = await mammoth.extractRawText({ arrayBuffer });
+                        extracted = result.value;
+                    } catch (err) {
+                        console.warn(`Mammoth failed for note file ${file.name}, trying binary fallback.`, err);
+                        extracted = await extractTextFromBinary(file);
+                    }
                 } else if (isPptxFile(file)) {
                     extracted = await extractTextFromPptx(file);
-                } else if (isLegacyBinaryFile(file)) {
+                } else {
+                    // Fallback for .doc, .ppt, and unknown types
+                    console.log("Processing legacy/binary file:", file.name);
                     extracted = await extractTextFromBinary(file);
                 }
                 
+                if (!extracted || extracted.trim().length === 0) {
+                    extracted = `[Gagal mengekstrak teks dari ${file.name}]`;
+                }
+
                 contextFromTextFiles += `\n\nDokumen ${file.name}:\n${extracted}`;
             } catch (err: any) {
                 console.error("Note Text Extraction Error", err);
-                alert(`Gagal membaca file ${file.name}`);
+                alert(`Gagal membaca file ${file.name}: ${err.message}`);
+                contextFromTextFiles += `\n\nDokumen ${file.name}: [Error: ${err.message}]`;
             }
         }
     }
@@ -681,7 +696,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     }));
 
     // Generate Summary using Visual Files + Extracted Text
-    const { title, content, quiz } = await generateNoteSummary(processedVisualFiles, contextFromTextFiles);
+    // PASS FILE COUNT HERE
+    const { title, content, quiz } = await generateNoteSummary(processedVisualFiles, contextFromTextFiles, rawFiles.length);
     
     const newNote: Note = {
         id: Date.now().toString(),

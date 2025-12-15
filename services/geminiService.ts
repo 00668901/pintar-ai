@@ -153,7 +153,8 @@ export const streamGeminiResponse = async (
 // Function for Notes Mode
 export const generateNoteSummary = async (
   images: VisionFile[],
-  contextText: string = ""
+  contextText: string = "",
+  fileCount: number = 1
 ): Promise<{ title: string, content: string, quiz: QuizQuestion[] }> => {
   const ai = getAIClient();
 
@@ -165,8 +166,13 @@ export const generateNoteSummary = async (
       };
   }
 
-  const model = "gemini-2.5-flash";
+  // Use Pro model for better reasoning on large contexts if many files, otherwise Flash
+  const model = fileCount >= 5 ? "gemini-3-pro-preview" : "gemini-2.5-flash";
   
+  // Logic for question count based on file count
+  const mcqCount = fileCount >= 5 ? 20 : 10;
+  const essayCount = 5;
+
   const parts: Part[] = [];
   images.forEach(img => {
     parts.push({
@@ -182,16 +188,19 @@ export const generateNoteSummary = async (
   2. Buatlah rangkuman catatan belajar yang lengkap, terstruktur, dan mudah dipahami dalam format Markdown. 
      - Gunakan gaya penulisan: 1. **Konsep**: Penjelasan.
      - Sertakan contoh nyata.
-  3. Buatlah kuis pilihan ganda (Multiple Choice) untuk menguji pemahaman siswa.
-     - JUMLAH SOAL: Buatlah TEPAT 10 (SEPULUH) SOAL.
-     - Tingkat kesulitan: Bervariasi (Mudah, Sedang, Sulit).
-     - Sertakan kunci jawaban dan penjelasan (pembahasan) singkat untuk setiap soal.
+  3. Buatlah Kuis Evaluasi:
+     - BAGIAN A: ${mcqCount} Soal Pilihan Ganda (Multiple Choice).
+       - Sertakan opsi A, B, C, D.
+       - Kunci jawaban dan penjelasan singkat.
+     - BAGIAN B: ${essayCount} Soal Esai (Uraian).
+       - Soal yang menguji pemahaman mendalam.
+       - Sertakan "Kunci Jawaban/Poin Penting" untuk referensi penilaian mandiri.
   
   IMPORTANT RESPONSE FORMAT RULES:
   - Output MUST be strictly valid JSON.
+  - Separate MCQ and Essay questions in the JSON structure as shown in schema.
   - When writing Math or LaTeX (e.g., inside 'content' or 'question'), you MUST escape backslashes properly for JSON strings.
     Example: use "\\\\frac{a}{b}" instead of "\\frac{a}{b}".
-  - Do NOT output Markdown code blocks (like \`\`\`json). Just the raw JSON string.
 
   ${contextText ? `\nTambahan konteks dari dokumen:\n${contextText}` : ''}`;
 
@@ -208,7 +217,7 @@ export const generateNoteSummary = async (
           properties: {
             title: { type: Type.STRING },
             content: { type: Type.STRING },
-            quiz: {
+            mcq_questions: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
@@ -220,22 +229,46 @@ export const generateNoteSummary = async (
                 },
                 required: ["question", "options", "answer", "explanation"]
               }
+            },
+            essay_questions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  answer: { type: Type.STRING, description: "Key points or sample answer" },
+                  explanation: { type: Type.STRING, description: "Additional context or explanation" }
+                },
+                required: ["question", "answer", "explanation"]
+              }
             }
           },
-          required: ["title", "content", "quiz"]
+          required: ["title", "content", "mcq_questions", "essay_questions"]
         }
       }
     });
     
     if (response.text) {
+        let parsedData;
         try {
-            // Using JSON5 for more lenient parsing
-            return JSON5.parse(response.text);
+            parsedData = JSON5.parse(response.text);
         } catch (e) {
             console.warn("JSON5 parse failed, attempting fallback cleanup", e);
             let cleanText = response.text.replace(/```json\n?|```/g, '');
-            return JSON5.parse(cleanText);
+            parsedData = JSON5.parse(cleanText);
         }
+
+        // Combine MCQ and Essay into uniform QuizQuestion structure
+        const quiz: QuizQuestion[] = [
+            ...(parsedData.mcq_questions || []).map((q: any) => ({ ...q, type: 'mcq' })),
+            ...(parsedData.essay_questions || []).map((q: any) => ({ ...q, type: 'essay', options: [] }))
+        ];
+
+        return {
+            title: parsedData.title,
+            content: parsedData.content,
+            quiz: quiz
+        };
     }
     throw new Error("Empty response text");
   } catch (error) {
@@ -259,14 +292,15 @@ export const regenerateQuiz = async (
 
   const model = "gemini-2.5-flash";
   
-  const prompt = `Berdasarkan rangkuman materi berikut, buatlah 10 (SEPULUH) soal kuis pilihan ganda BARU yang berbeda dari sebelumnya jika memungkinkan.
+  const prompt = `Berdasarkan rangkuman materi berikut, buatlah kuis evaluasi campuran:
+  1. 5 Soal Pilihan Ganda (MCQ).
+  2. 2 Soal Esai.
   
   MATERI:
   ${content}
 
   IMPORTANT:
-  - Return ONLY a JSON Array of objects.
-  - Structure per object: { question, options (array of strings), answer (string), explanation (string) }
+  - Return JSON object with two arrays: 'mcq_questions' and 'essay_questions'.
   - Escape LaTeX properly.
   `;
 
@@ -277,16 +311,33 @@ export const regenerateQuiz = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              question: { type: Type.STRING },
-              options: { type: Type.ARRAY, items: { type: Type.STRING } },
-              answer: { type: Type.STRING },
-              explanation: { type: Type.STRING }
+          type: Type.OBJECT,
+          properties: {
+            mcq_questions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  answer: { type: Type.STRING },
+                  explanation: { type: Type.STRING }
+                },
+                required: ["question", "options", "answer", "explanation"]
+              }
             },
-            required: ["question", "options", "answer", "explanation"]
+            essay_questions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question: { type: Type.STRING },
+                    answer: { type: Type.STRING },
+                    explanation: { type: Type.STRING }
+                  },
+                  required: ["question", "answer", "explanation"]
+                }
+              }
           }
         }
       }
@@ -294,10 +345,19 @@ export const regenerateQuiz = async (
 
     if (response.text) {
       try {
-        return JSON5.parse(response.text);
+        const parsed = JSON5.parse(response.text);
+        const quiz: QuizQuestion[] = [
+            ...(parsed.mcq_questions || []).map((q: any) => ({ ...q, type: 'mcq' })),
+            ...(parsed.essay_questions || []).map((q: any) => ({ ...q, type: 'essay', options: [] }))
+        ];
+        return quiz;
       } catch (e) {
          const cleanText = response.text.replace(/```json\n?|```/g, '');
-         return JSON5.parse(cleanText);
+         const parsed = JSON5.parse(cleanText);
+         return [
+            ...(parsed.mcq_questions || []).map((q: any) => ({ ...q, type: 'mcq' })),
+            ...(parsed.essay_questions || []).map((q: any) => ({ ...q, type: 'essay', options: [] }))
+         ];
       }
     }
     return [];

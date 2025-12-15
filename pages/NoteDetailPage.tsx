@@ -19,8 +19,16 @@ interface NoteDetailPageProps {
 }
 
 // --- FILE HELPERS (Duplicated from ChatApp for portability) ---
-const isDocxFile = (file: File) => file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.toLowerCase().endsWith('.docx');
+const isDocxFile = (file: File) => {
+    const name = file.name.toLowerCase();
+    const type = file.type;
+    // Strict exclusion of MS Word binary type and .doc extension to prevent Mammoth errors
+    if (type === 'application/msword' || name.endsWith('.doc')) return false;
+    return type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx');
+};
+
 const isPptxFile = (file: File) => file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.toLowerCase().endsWith('.pptx');
+
 const isLegacyBinaryFile = (file: File) => {
     const name = file.name.toLowerCase();
     const type = file.type;
@@ -30,21 +38,14 @@ const isLegacyBinaryFile = (file: File) => {
 const extractTextFromBinary = async (file: File): Promise<string> => {
     try {
         const buffer = await file.arrayBuffer();
-        const view = new Uint8Array(buffer);
-        let result = "";
-        let currentString = "";
-        for (let i = 0; i < view.length; i++) {
-            const code = view[i];
-            const isPrintable = (code >= 32 && code <= 126) || code === 10 || code === 13 || code === 9;
-            if (isPrintable) {
-                currentString += String.fromCharCode(code);
-            } else {
-                if (currentString.length > 4) result += currentString + " ";
-                currentString = "";
-            }
+        const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+        const text = decoder.decode(buffer);
+        // Matches strings of 4+ printable chars
+        const matches = text.match(/[A-Za-z0-9\s.,?!@#$%^&*()_\-+=[\]{}|\\:;"'<>/]{4,}/g);
+        if (matches && matches.length > 0) {
+            return matches.join(' ');
         }
-        if (currentString.length > 4) result += currentString;
-        return result.trim();
+        return "";
     } catch (e) {
         console.error("Binary extraction failed", e);
         return "";
@@ -53,8 +54,10 @@ const extractTextFromBinary = async (file: File): Promise<string> => {
 
 const extractTextFromPptx = async (file: File): Promise<string> => {
     try {
-        const zip = await JSZip.loadAsync(file);
-        const slideFiles = Object.keys(zip.files).filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'));
+        const zip = new JSZip();
+        await zip.loadAsync(file);
+        
+        const slideFiles = Object.keys(zip.files).filter(name => name.includes('ppt/slides/slide'));
         slideFiles.sort((a: string, b: string) => {
             const numA = parseInt(a.match(/slide(\d+)\.xml/)?.[1] || '0');
             const numB = parseInt(b.match(/slide(\d+)\.xml/)?.[1] || '0');
@@ -66,25 +69,30 @@ const extractTextFromPptx = async (file: File): Promise<string> => {
             const content = await zip.files[slideFile].async('string');
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(content, "text/xml");
-            const texts = xmlDoc.getElementsByTagName("a:t");
+            
+            const allElements = xmlDoc.getElementsByTagName("*");
             let slideText = "";
-            for (let i = 0; i < texts.length; i++) {
-                slideText += texts[i].textContent + " ";
+            for(let i=0; i<allElements.length; i++) {
+                if(allElements[i].localName === 't') {
+                    slideText += allElements[i].textContent + " ";
+                }
             }
+            
             if (slideText.trim()) {
-                fullText += `[Slide ${slideFile.replace('ppt/slides/', '').replace('.xml','')}]\n${slideText.trim()}\n\n`;
+                fullText += `[Slide ${slideFile.match(/slide(\d+)/)?.[1]}]\n${slideText.trim()}\n\n`;
             }
         }
         return fullText;
     } catch (e) {
         console.error("PPTX Parsing Error", e);
-        return "";
+        return await extractTextFromBinary(file); // Fallback
     }
 };
 
 export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, onUpdateNote, onDeleteNote }) => {
     const [activeTab, setActiveTab] = useState<'summary' | 'quiz'>('summary');
     const [quizAnswers, setQuizAnswers] = useState<{[key: number]: string}>({});
+    const [essayRevealed, setEssayRevealed] = useState<{[key: number]: boolean}>({});
     const [showResults, setShowResults] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
     const [isProcessingFiles, setIsProcessingFiles] = useState(false);
@@ -128,14 +136,29 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
         });
     };
 
+    const toggleEssayAnswer = (index: number) => {
+        setEssayRevealed(prev => ({...prev, [index]: !prev[index]}));
+    };
+
     const calculateScore = () => {
         if (!note.quiz) return 0;
         let correct = 0;
+        let totalMCQ = 0;
+        
         note.quiz.forEach((q, idx) => {
-            if (quizAnswers[idx] === q.answer) correct++;
+            if (q.type === 'mcq' || (!q.type && q.options)) { // Backward compatibility
+                totalMCQ++;
+                if (quizAnswers[idx] === q.answer) correct++;
+            }
         });
-        return Math.round((correct / note.quiz.length) * 100);
+        
+        if (totalMCQ === 0) return 0;
+        return Math.round((correct / totalMCQ) * 100);
     };
+
+    const countMCQ = useMemo(() => {
+        return note.quiz?.filter(q => q.type === 'mcq' || (!q.type && q.options))?.length || 0;
+    }, [note.quiz]);
 
     const handleRegenerateQuiz = async () => {
         if (isRegenerating) return;
@@ -146,6 +169,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                 const updatedNote = { ...note, quiz: newQuiz };
                 onUpdateNote(updatedNote);
                 setQuizAnswers({});
+                setEssayRevealed({});
                 setShowResults(false);
             } else {
                 alert("Gagal membuat soal baru. Silakan coba lagi.");
@@ -187,13 +211,19 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                 // 2. Extract Text (Smart Processing)
                 let text = "";
                 if (isDocxFile(file)) {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const result = await mammoth.extractRawText({ arrayBuffer });
-                    text = result.value;
+                     try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const result = await mammoth.extractRawText({ arrayBuffer });
+                        text = result.value;
+                     } catch (err) {
+                        console.warn("Mammoth failed, fallback to binary", err);
+                        text = await extractTextFromBinary(file);
+                     }
                 } else if (isPptxFile(file)) {
                     text = await extractTextFromPptx(file);
-                } else if (isLegacyBinaryFile(file)) {
-                    text = await extractTextFromBinary(file);
+                } else {
+                     // Fallback for unknown text types or misidentified types including msword
+                     text = await extractTextFromBinary(file);
                 }
 
                 if (text) {
@@ -360,6 +390,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                              const fileName = (isEditing ? editedSourceNames : note.sourceFileNames)?.[i] || `File ${i+1}`;
                                              const isPdf = mime.includes('pdf') || fileName.endsWith('.pdf');
                                              const isDoc = mime.includes('word') || fileName.endsWith('.doc') || fileName.endsWith('.docx');
+                                             const isPpt = mime.includes('presentation') || mime.includes('powerpoint') || mime.includes('vnd.ms-powerpoint') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx');
                                              
                                              let bgClass = "bg-slate-100 dark:bg-slate-800/50";
                                              let textClass = "text-slate-500 dark:text-slate-400";
@@ -373,6 +404,10 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                 bgClass = "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30";
                                                 textClass = "text-blue-500 dark:text-blue-400";
                                                 label = "DOC";
+                                             } else if (isPpt) {
+                                                bgClass = "bg-orange-50 dark:bg-orange-900/10 border-orange-100 dark:border-orange-900/30";
+                                                textClass = "text-orange-500 dark:text-orange-400";
+                                                label = "PPT";
                                              }
 
                                              return (
@@ -470,7 +505,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                          </div>
                      )}
 
-                     {/* TAB: QUIZ (No changes to logic, just kept structure) */}
+                     {/* TAB: QUIZ */}
                      {activeTab === 'quiz' && !isEditing && (
                          <div className="max-w-3xl mx-auto animate-fade-in">
                              {!note.quiz || note.quiz.length === 0 ? (
@@ -488,7 +523,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10 blur-2xl"></div>
                                              <div className="absolute bottom-0 left-0 w-40 h-40 bg-white/10 rounded-full -ml-10 -mb-10 blur-3xl"></div>
                                              
-                                             <p className="text-indigo-100 font-medium mb-1 uppercase tracking-widest text-xs relative z-10">Hasil Kuis Anda</p>
+                                             <p className="text-indigo-100 font-medium mb-1 uppercase tracking-widest text-xs relative z-10">Skor Pilihan Ganda</p>
                                              <div className="text-6xl font-extrabold mb-3 tracking-tighter relative z-10">{calculateScore()}</div>
                                              <div className="w-full bg-black/20 h-2 rounded-full max-w-xs mx-auto mb-6 overflow-hidden backdrop-blur-sm relative z-10">
                                                  <div className="bg-white h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${calculateScore()}%`}}></div>
@@ -523,57 +558,106 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                      ) : (
                                         <div className="space-y-6">
                                             {note.quiz.map((q, idx) => {
-                                                const userAnswer = quizAnswers[idx];
-                                                const isCorrect = userAnswer === q.answer;
+                                                const isEssay = q.type === 'essay';
                                                 
-                                                return (
-                                                    <div key={idx} className={`rounded-2xl p-6 border transition-all duration-300 ${showResults ? (isCorrect ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800' : 'bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800') : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-                                                        <div className="flex gap-4 mb-4">
-                                                            <span className={`flex-shrink-0 w-8 h-8 rounded-lg font-bold flex items-center justify-center text-sm ${showResults ? (isCorrect ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
-                                                                {idx + 1}
-                                                            </span>
-                                                            <div className="flex-1">
-                                                                <div className="flex justify-between items-start">
-                                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed">{q.question}</h3>
-                                                                    {userAnswer !== undefined && !showResults && (
-                                                                        <button onClick={() => handleResetQuestion(idx)} className="text-slate-400 hover:text-primary-600">
-                                                                            <ReloadIcon />
-                                                                        </button>
+                                                // Handle MCQ Rendering
+                                                if (!isEssay && q.options) {
+                                                    const userAnswer = quizAnswers[idx];
+                                                    const isCorrect = userAnswer === q.answer;
+                                                    
+                                                    return (
+                                                        <div key={idx} className={`rounded-2xl p-6 border transition-all duration-300 ${showResults ? (isCorrect ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800' : 'bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800') : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
+                                                            <div className="flex gap-4 mb-4">
+                                                                <span className={`flex-shrink-0 w-8 h-8 rounded-lg font-bold flex items-center justify-center text-sm ${showResults ? (isCorrect ? 'bg-green-500 text-white' : 'bg-red-500 text-white') : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                                                                    {idx + 1}
+                                                                </span>
+                                                                <div className="flex-1">
+                                                                    <div className="flex justify-between items-start">
+                                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed">{q.question}</h3>
+                                                                        {userAnswer !== undefined && !showResults && (
+                                                                            <button onClick={() => handleResetQuestion(idx)} className="text-slate-400 hover:text-primary-600">
+                                                                                <ReloadIcon />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="space-y-3">
+                                                                        {q.options.map((option, optIdx) => {
+                                                                            let btnClass = "w-full text-left px-5 py-3.5 rounded-xl border text-sm transition-all font-medium ";
+                                                                            
+                                                                            if (showResults) {
+                                                                                if (option === q.answer) btnClass += "bg-green-100 dark:bg-green-900/30 border-green-500 text-green-800 dark:text-green-200";
+                                                                                else if (userAnswer === option && option !== q.answer) btnClass += "bg-red-100 dark:bg-red-900/30 border-red-400 text-red-800 dark:text-red-200";
+                                                                                else btnClass += "bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-400 opacity-60";
+                                                                            } else {
+                                                                                if (userAnswer === option) btnClass += "bg-primary-50 dark:bg-primary-900/30 border-primary-500 text-primary-900 dark:text-primary-100 shadow-sm";
+                                                                                else btnClass += "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300";
+                                                                            }
+                
+                                                                            return (
+                                                                                <button 
+                                                                                    key={optIdx}
+                                                                                    onClick={() => handleAnswer(idx, option)}
+                                                                                    disabled={showResults}
+                                                                                    className={btnClass}
+                                                                                >
+                                                                                    <div className="flex justify-between items-center">
+                                                                                        <span>{option}</span>
+                                                                                        {showResults && option === q.answer && <CheckIcon />}
+                                                                                    </div>
+                                                                                </button>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                    {showResults && (
+                                                                        <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm">
+                                                                            <strong className="text-slate-900 dark:text-white block mb-1">Pembahasan:</strong>
+                                                                            {q.explanation}
+                                                                        </div>
                                                                     )}
                                                                 </div>
-                                                                <div className="space-y-3">
-                                                                    {q.options.map((option, optIdx) => {
-                                                                        let btnClass = "w-full text-left px-5 py-3.5 rounded-xl border text-sm transition-all font-medium ";
-                                                                        
-                                                                        if (showResults) {
-                                                                            if (option === q.answer) btnClass += "bg-green-100 dark:bg-green-900/30 border-green-500 text-green-800 dark:text-green-200";
-                                                                            else if (userAnswer === option && option !== q.answer) btnClass += "bg-red-100 dark:bg-red-900/30 border-red-400 text-red-800 dark:text-red-200";
-                                                                            else btnClass += "bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-400 opacity-60";
-                                                                        } else {
-                                                                            if (userAnswer === option) btnClass += "bg-primary-50 dark:bg-primary-900/30 border-primary-500 text-primary-900 dark:text-primary-100 shadow-sm";
-                                                                            else btnClass += "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300";
-                                                                        }
-            
-                                                                        return (
-                                                                            <button 
-                                                                                key={optIdx}
-                                                                                onClick={() => handleAnswer(idx, option)}
-                                                                                disabled={showResults}
-                                                                                className={btnClass}
-                                                                            >
-                                                                                <div className="flex justify-between items-center">
-                                                                                    <span>{option}</span>
-                                                                                    {showResults && option === q.answer && <CheckIcon />}
-                                                                                </div>
-                                                                            </button>
-                                                                        )
-                                                                    })}
-                                                                </div>
-                                                                {showResults && (
-                                                                    <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm">
-                                                                        <strong className="text-slate-900 dark:text-white block mb-1">Pembahasan:</strong>
-                                                                        {q.explanation}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                } 
+                                                
+                                                // Handle Essay Rendering
+                                                return (
+                                                    <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+                                                        <div className="flex gap-4 mb-4">
+                                                            <span className="flex-shrink-0 w-8 h-8 rounded-lg font-bold flex items-center justify-center text-sm bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800">
+                                                                {idx + 1}
+                                                            </span>
+                                                            <div className="flex-1 w-full">
+                                                                <span className="text-xs font-bold text-indigo-500 dark:text-indigo-400 mb-1 block uppercase tracking-wider">Soal Esai</span>
+                                                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed">{q.question}</h3>
+                                                                
+                                                                <textarea 
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none mb-4 resize-y min-h-[100px]"
+                                                                    placeholder="Tulis jawabanmu di sini (untuk latihan mandiri)..."
+                                                                ></textarea>
+
+                                                                {essayRevealed[idx] ? (
+                                                                    <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 rounded-xl p-5 animate-fade-in">
+                                                                        <div className="flex justify-between items-start mb-2">
+                                                                            <strong className="text-green-800 dark:text-green-300 text-sm">Kunci Jawaban / Poin Penting:</strong>
+                                                                            <button onClick={() => toggleEssayAnswer(idx)} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">Sembunyikan</button>
+                                                                        </div>
+                                                                        <div className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed mb-3">
+                                                                            <ReactMarkdown>{q.answer}</ReactMarkdown>
+                                                                        </div>
+                                                                        {q.explanation && (
+                                                                            <div className="text-xs text-slate-500 dark:text-slate-400 pt-3 border-t border-green-200 dark:border-green-800/30">
+                                                                                <span className="font-semibold">Info Tambahan:</span> {q.explanation}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
+                                                                ) : (
+                                                                    <button 
+                                                                        onClick={() => toggleEssayAnswer(idx)}
+                                                                        className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                                                                    >
+                                                                        👁️ Lihat Kunci Jawaban
+                                                                    </button>
                                                                 )}
                                                             </div>
                                                         </div>
@@ -588,16 +672,17 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                              {!showResults ? (
                                                  <button 
                                                      onClick={() => setShowResults(true)}
-                                                     disabled={Object.keys(quizAnswers).length < note.quiz.length}
+                                                     disabled={Object.keys(quizAnswers).length < countMCQ}
                                                      className="px-8 py-3 bg-primary-600 text-white font-bold rounded-full shadow-xl shadow-primary-200 dark:shadow-none hover:bg-primary-700 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed transition-all transform hover:-translate-y-1 hover:scale-105"
                                                  >
-                                                     Cek Hasil ({Object.keys(quizAnswers).length}/{note.quiz.length})
+                                                     Cek Hasil Pilihan Ganda ({Object.keys(quizAnswers).length}/{countMCQ})
                                                  </button>
                                              ) : (
                                                  <button 
                                                      onClick={() => {
                                                          setShowResults(false);
                                                          setQuizAnswers({});
+                                                         setEssayRevealed({});
                                                          window.scrollTo({top: 0, behavior: 'smooth'});
                                                      }}
                                                      className="px-8 py-3 bg-slate-800 dark:bg-slate-700 text-white font-bold rounded-full shadow-xl hover:bg-slate-900 dark:hover:bg-slate-600 transition-all transform hover:-translate-y-1 hover:scale-105"

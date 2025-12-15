@@ -20,9 +20,10 @@ export interface ChatSession {
 }
 
 export interface QuizQuestion {
+  type?: 'mcq' | 'essay'; // Type of question
   question: string;
-  options: string[];
-  answer: string; // The correct answer text
+  options?: string[]; // Optional for essays
+  answer: string; // The correct answer text (or key points for essay)
   explanation: string;
 }
 
