@@ -3,8 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+// @ts-ignore
+import mammoth from 'mammoth';
+// @ts-ignore
+import JSZip from 'jszip';
 import { Note, QuizQuestion } from '../types';
-import { CloseIcon, CheckIcon, FileIcon, ReloadIcon, SparklesIcon, BookIcon, TrashIcon } from '../components/Icons';
+import { CloseIcon, CheckIcon, FileIcon, ReloadIcon, SparklesIcon, BookIcon, TrashIcon, PlusIcon } from '../components/Icons';
 import { regenerateQuiz } from '../services/geminiService';
 
 interface NoteDetailPageProps {
@@ -14,11 +18,76 @@ interface NoteDetailPageProps {
     onDeleteNote: (id: string, title: string) => void;
 }
 
+// --- FILE HELPERS (Duplicated from ChatApp for portability) ---
+const isDocxFile = (file: File) => file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.toLowerCase().endsWith('.docx');
+const isPptxFile = (file: File) => file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.toLowerCase().endsWith('.pptx');
+const isLegacyBinaryFile = (file: File) => {
+    const name = file.name.toLowerCase();
+    const type = file.type;
+    return type === 'application/msword' || type === 'application/vnd.ms-powerpoint' || name.endsWith('.doc') || name.endsWith('.ppt');
+};
+
+const extractTextFromBinary = async (file: File): Promise<string> => {
+    try {
+        const buffer = await file.arrayBuffer();
+        const view = new Uint8Array(buffer);
+        let result = "";
+        let currentString = "";
+        for (let i = 0; i < view.length; i++) {
+            const code = view[i];
+            const isPrintable = (code >= 32 && code <= 126) || code === 10 || code === 13 || code === 9;
+            if (isPrintable) {
+                currentString += String.fromCharCode(code);
+            } else {
+                if (currentString.length > 4) result += currentString + " ";
+                currentString = "";
+            }
+        }
+        if (currentString.length > 4) result += currentString;
+        return result.trim();
+    } catch (e) {
+        console.error("Binary extraction failed", e);
+        return "";
+    }
+};
+
+const extractTextFromPptx = async (file: File): Promise<string> => {
+    try {
+        const zip = await JSZip.loadAsync(file);
+        const slideFiles = Object.keys(zip.files).filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'));
+        slideFiles.sort((a: string, b: string) => {
+            const numA = parseInt(a.match(/slide(\d+)\.xml/)?.[1] || '0');
+            const numB = parseInt(b.match(/slide(\d+)\.xml/)?.[1] || '0');
+            return numA - numB;
+        });
+
+        let fullText = "";
+        for (const slideFile of slideFiles) {
+            const content = await zip.files[slideFile].async('string');
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(content, "text/xml");
+            const texts = xmlDoc.getElementsByTagName("a:t");
+            let slideText = "";
+            for (let i = 0; i < texts.length; i++) {
+                slideText += texts[i].textContent + " ";
+            }
+            if (slideText.trim()) {
+                fullText += `[Slide ${slideFile.replace('ppt/slides/', '').replace('.xml','')}]\n${slideText.trim()}\n\n`;
+            }
+        }
+        return fullText;
+    } catch (e) {
+        console.error("PPTX Parsing Error", e);
+        return "";
+    }
+};
+
 export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, onUpdateNote, onDeleteNote }) => {
     const [activeTab, setActiveTab] = useState<'summary' | 'quiz'>('summary');
     const [quizAnswers, setQuizAnswers] = useState<{[key: number]: string}>({});
     const [showResults, setShowResults] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
+    const [isProcessingFiles, setIsProcessingFiles] = useState(false);
     
     // Edit State
     const [isEditing, setIsEditing] = useState(false);
@@ -33,9 +102,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
     const formattedContent = useMemo(() => {
         if (!note.content) return "";
         let clean = note.content;
-        // Replace literal string "\n" with actual newline character
         clean = clean.replace(/\\n/g, '\n');
-        // Replace literal string "\t" with tab
         clean = clean.replace(/\\t/g, '  ');
         return clean;
     }, [note.content]);
@@ -43,7 +110,6 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
     // Reset edit state when note changes or when canceling edit
     useEffect(() => {
         setEditedTitle(note.title);
-        // Use the raw content for editing, but formatted for viewing
         setEditedContent(formattedContent);
         setEditedFiles(note.originalFiles || []);
         setEditedSourceNames(note.sourceFileNames || []);
@@ -92,16 +158,20 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
         }
     };
 
-    // Edit Logic
+    // Edit Logic with Smart Extraction
     const handleAddFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []) as File[];
         if (files.length === 0) return;
+        
+        setIsProcessingFiles(true);
+        let additionalContent = "";
 
         const newFilesData: string[] = [];
         const newFileNames: string[] = [];
 
         for (const file of files) {
             try {
+                // 1. Convert to Base64 for Visual Attachment
                 const base64 = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => {
@@ -113,14 +183,37 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                 });
                 newFilesData.push(base64);
                 newFileNames.push(file.name);
+
+                // 2. Extract Text (Smart Processing)
+                let text = "";
+                if (isDocxFile(file)) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer });
+                    text = result.value;
+                } else if (isPptxFile(file)) {
+                    text = await extractTextFromPptx(file);
+                } else if (isLegacyBinaryFile(file)) {
+                    text = await extractTextFromBinary(file);
+                }
+
+                if (text) {
+                    additionalContent += `\n\n--- Tambahan: ${file.name} ---\n${text}\n`;
+                }
+
             } catch (err) {
                 console.error("Error reading file:", file.name, err);
+                alert(`Gagal memproses file ${file.name}`);
             }
         }
 
         setEditedFiles(prev => [...prev, ...newFilesData]);
         setEditedSourceNames(prev => [...prev, ...newFileNames]);
-        e.target.value = '';
+        if (additionalContent) {
+            setEditedContent(prev => prev + additionalContent);
+        }
+        
+        setIsProcessingFiles(false);
+        if (editFileInputRef.current) editFileInputRef.current.value = '';
     };
 
     const handleRemoveFile = (index: number) => {
@@ -132,7 +225,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
         const updatedNote: Note = {
             ...note,
             title: editedTitle,
-            content: editedContent, // Save the edited (cleaned) content back
+            content: editedContent, // Save the edited (cleaned + added) content back
             originalFiles: editedFiles,
             sourceFileNames: editedSourceNames, 
         };
@@ -183,9 +276,10 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                     </button>
                                     <button 
                                         onClick={handleSave} 
-                                        className="px-4 py-1.5 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-all"
+                                        disabled={isProcessingFiles}
+                                        className="px-4 py-1.5 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-all shadow-md shadow-primary-200 dark:shadow-none disabled:opacity-70"
                                     >
-                                        Simpan
+                                        {isProcessingFiles ? 'Memproses...' : 'Simpan'}
                                     </button>
                                  </>
                              ) : (
@@ -193,7 +287,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                     <button 
                                         onClick={() => setIsEditing(true)}
                                         className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                                        title="Edit"
+                                        title="Edit Catatan"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
@@ -202,7 +296,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                     <button 
                                         onClick={() => onDeleteNote(note.id, note.title)}
                                         className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                                        title="Hapus"
+                                        title="Hapus Catatan"
                                     >
                                         <TrashIcon />
                                     </button>
@@ -237,7 +331,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                      {(activeTab === 'summary' || isEditing) && (
                          <div className="animate-fade-in">
                              
-                             {/* Section: Sumber Materi (Clean Grid Layout) */}
+                             {/* Section: Sumber Materi */}
                              {(editedFiles.length > 0 || isEditing || (note.sourceFileNames && note.sourceFileNames.length > 0)) && (
                                  <div className="mb-10">
                                      <div className="flex items-center justify-between mb-4">
@@ -247,9 +341,14 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                          {isEditing && (
                                              <button 
                                                 onClick={() => editFileInputRef.current?.click()}
-                                                className="text-primary-600 text-xs font-bold hover:underline"
+                                                disabled={isProcessingFiles}
+                                                className="flex items-center gap-1 text-primary-600 text-xs font-bold hover:underline disabled:opacity-50"
                                              >
-                                                + Tambah File
+                                                {isProcessingFiles ? (
+                                                    <span className="animate-pulse">Sedang Ekstrak Teks...</span>
+                                                ) : (
+                                                    <>+ Tambah File</>
+                                                )}
                                              </button>
                                          )}
                                      </div>
@@ -277,7 +376,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                              }
 
                                              return (
-                                                 <div key={i} className={`group relative aspect-[4/3] rounded-xl border ${bgClass} ${isEditing ? 'border-slate-300 dark:border-slate-600' : 'border-transparent'} flex flex-col items-center justify-center p-4 transition-all hover:scale-[1.02] hover:shadow-md`}>
+                                                 <div key={i} className={`group relative aspect-[4/3] rounded-xl border ${bgClass} ${isEditing ? 'border-slate-300 dark:border-slate-600 cursor-default' : 'border-transparent'} flex flex-col items-center justify-center p-4 transition-all hover:scale-[1.02] hover:shadow-md`}>
                                                      {mime.startsWith('image/') ? (
                                                          <img src={file} className="absolute inset-0 w-full h-full object-cover rounded-xl opacity-80 group-hover:opacity-100 transition-opacity" />
                                                      ) : (
@@ -295,7 +394,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                      {isEditing && (
                                                          <button 
                                                              onClick={(e) => { e.stopPropagation(); handleRemoveFile(i); }}
-                                                             className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 z-10"
+                                                             className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 z-10 scale-90 hover:scale-100 transition-transform"
                                                          >
                                                              <CloseIcon />
                                                          </button>
@@ -303,20 +402,45 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                  </div>
                                              );
                                          })}
+                                         
+                                         {/* Add File Placeholder (Visible only in Edit Mode) */}
+                                         {isEditing && (
+                                             <button 
+                                                onClick={() => editFileInputRef.current?.click()}
+                                                disabled={isProcessingFiles}
+                                                className="aspect-[4/3] rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 hover:text-primary-500 hover:border-primary-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all"
+                                             >
+                                                {isProcessingFiles ? (
+                                                     <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                                                ) : (
+                                                     <>
+                                                        <PlusIcon />
+                                                        <span className="text-[10px] font-bold mt-1">TAMBAH</span>
+                                                     </>
+                                                )}
+                                             </button>
+                                         )}
                                      </div>
-                                     <input type="file" multiple className="hidden" ref={editFileInputRef} onChange={handleAddFile} />
+                                     <input 
+                                        type="file" 
+                                        multiple 
+                                        className="hidden" 
+                                        ref={editFileInputRef} 
+                                        onChange={handleAddFile} 
+                                        accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                                     />
                                  </div>
                              )}
 
                              {/* Section: Main Content */}
-                             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm min-h-[500px]">
+                             <div className={`bg-white dark:bg-slate-900 rounded-2xl border ${isEditing ? 'border-primary-300 dark:border-primary-800 ring-4 ring-primary-50 dark:ring-primary-900/20' : 'border-slate-200 dark:border-slate-800'} shadow-sm min-h-[500px] transition-all`}>
                                  <div className="p-8 md:p-12">
                                      {isEditing ? (
                                          <textarea 
                                             value={editedContent}
                                             onChange={(e) => setEditedContent(e.target.value)}
-                                            className="w-full h-[600px] bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 font-mono text-sm leading-relaxed p-0 resize-none"
-                                            placeholder="Tulis konten..."
+                                            className="w-full h-[600px] bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 font-mono text-sm leading-relaxed p-0 resize-none outline-none"
+                                            placeholder="Tulis ringkasan atau materi catatan di sini..."
                                          />
                                      ) : (
                                          <article className="markdown-body">
@@ -328,17 +452,12 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                      h1: ({children}) => <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-8 pb-6 border-b border-slate-100 dark:border-slate-800">{children}</h1>,
                                                      h2: ({children}) => <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-12 mb-6 tracking-tight">{children}</h2>,
                                                      h3: ({children}) => <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mt-10 mb-4">{children}</h3>,
-                                                     // Improve readability for paragraphs - increased margin and relaxed leading
                                                      p: ({children}) => <p className="mb-6 leading-8 text-slate-600 dark:text-slate-300 text-[1.05rem]">{children}</p>,
-                                                     // Style lists to be cleaner - increased spacing between items
                                                      ul: ({children}) => <ul className="list-disc pl-6 mb-8 space-y-3 text-slate-600 dark:text-slate-300 leading-7">{children}</ul>,
                                                      ol: ({children}) => <ol className="list-decimal pl-6 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-7">{children}</ol>,
                                                      li: ({children}) => <li className="pl-2 mb-1">{children}</li>,
-                                                     // Strong tag styling (Bold keys)
                                                      strong: ({children}) => <strong className="font-bold text-slate-900 dark:text-slate-100">{children}</strong>,
-                                                     // Clean blockquotes - increased margin
                                                      blockquote: ({children}) => <blockquote className="border-l-4 border-primary-500 pl-6 py-4 my-8 italic text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-r-xl shadow-sm">{children}</blockquote>,
-                                                     // Inline code
                                                      code: ({children}) => <code className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-2 py-1 rounded-md text-sm font-mono border border-slate-200 dark:border-slate-700 mx-1">{children}</code>
                                                  }}
                                              >
@@ -351,7 +470,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                          </div>
                      )}
 
-                     {/* TAB: QUIZ */}
+                     {/* TAB: QUIZ (No changes to logic, just kept structure) */}
                      {activeTab === 'quiz' && !isEditing && (
                          <div className="max-w-3xl mx-auto animate-fade-in">
                              {!note.quiz || note.quiz.length === 0 ? (

@@ -272,6 +272,48 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         name.endsWith('.ppt')
     );
   };
+  
+  // Checks for any supported text document type
+  const isTextDocument = (file: File) => {
+      return isDocxFile(file) || isPptxFile(file) || isLegacyBinaryFile(file);
+  };
+
+  // Fallback string extractor for binary files (.doc, .ppt)
+  // This extracts printable characters, ignoring binary noise.
+  const extractTextFromBinary = async (file: File): Promise<string> => {
+      try {
+          const buffer = await file.arrayBuffer();
+          const view = new Uint8Array(buffer);
+          let result = "";
+          let currentString = "";
+          
+          // Heuristic: Scan for printable ASCII (32-126) and some formatting chars
+          for (let i = 0; i < view.length; i++) {
+              const code = view[i];
+              const isPrintable = (code >= 32 && code <= 126) || code === 10 || code === 13 || code === 9;
+              
+              if (isPrintable) {
+                  currentString += String.fromCharCode(code);
+              } else {
+                  // If we have a sequence longer than 4 chars, treat it as text
+                  // This filters out short binary noise sequences that happen to be in ASCII range
+                  if (currentString.length > 4) {
+                      result += currentString + " ";
+                  }
+                  currentString = "";
+              }
+          }
+          // Catch trailing
+          if (currentString.length > 4) {
+              result += currentString;
+          }
+          
+          return result.trim();
+      } catch (e) {
+          console.error("Binary extraction failed", e);
+          return "";
+      }
+  };
 
   const extractTextFromPptx = async (file: File): Promise<string> => {
     try {
@@ -307,25 +349,54 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   const processFileSelection = async (files: File[]) => {
     const visualFiles: File[] = [];
     const textConversionFiles: File[] = [];
-    const legacyFiles: string[] = [];
     const unknownFiles: string[] = [];
 
     files.forEach(f => {
+      // Prioritize checking text documents first to classify .doc/.docx/.ppt/.pptx properly
+      // Note: isVisualFile includes PDF, but we handle PDF as visual (for Vision API).
       if (isVisualFile(f)) {
         visualFiles.push(f);
-      } else if (isDocxFile(f) || isPptxFile(f)) {
+      } else if (isTextDocument(f)) {
         textConversionFiles.push(f);
-      } else if (isLegacyBinaryFile(f)) {
-        legacyFiles.push(f.name);
       } else {
         unknownFiles.push(f.name);
       }
     });
 
-    if (legacyFiles.length > 0) {
-      alert(`File format lama tidak didukung (.doc/.ppt). Harap konversi ke .docx/.pptx.`);
+    // 1. Process Text Conversion FIRST (as requested)
+    // This ensures text is ready in the input box before any visual previews are rendered or uploaded.
+    if (textConversionFiles.length > 0) {
+      setIsLoading(true);
+      for (const file of textConversionFiles) {
+        try {
+          let textContent = "";
+          const header = `\n\n--- Isi Dokumen (${file.name}) ---\n`;
+          const footer = `\n--- Akhir Dokumen ---\n`;
+
+          if (isDocxFile(file)) {
+             const arrayBuffer = await file.arrayBuffer();
+             const result = await mammoth.extractRawText({ arrayBuffer });
+             textContent = result.value;
+          } else if (isPptxFile(file)) {
+             textContent = await extractTextFromPptx(file);
+          } else if (isLegacyBinaryFile(file)) {
+             // Fallback for .doc and .ppt using binary extraction
+             textContent = await extractTextFromBinary(file);
+             if (!textContent) {
+                 textContent = "[Gagal mengekstrak teks dari file biner. Isi mungkin kosong atau terenkripsi]";
+             }
+          }
+          
+          setInput(prev => prev + header + textContent + footer);
+        } catch (err: any) {
+          console.error("File Conversion Error", err);
+          alert(`Gagal membaca file ${file.name}`);
+        }
+      }
+      setIsLoading(false);
     }
 
+    // 2. Process Visual Files (Images/PDF for Vision)
     if (visualFiles.length > 0) {
       setSelectedFiles(prev => [...prev, ...visualFiles]);
       visualFiles.forEach(file => {
@@ -335,28 +406,6 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         };
         reader.readAsDataURL(file);
       });
-    }
-
-    if (textConversionFiles.length > 0) {
-      setIsLoading(true);
-      for (const file of textConversionFiles) {
-        try {
-          let textContent = "";
-          if (isDocxFile(file)) {
-             const arrayBuffer = await file.arrayBuffer();
-             const result = await mammoth.extractRawText({ arrayBuffer });
-             textContent = `\n\n--- Isi Dokumen Word (${file.name}) ---\n${result.value}\n--- Akhir Dokumen ---\n`;
-          } else if (isPptxFile(file)) {
-             const extracted = await extractTextFromPptx(file);
-             textContent = `\n\n--- Isi Slide PowerPoint (${file.name}) ---\n${extracted}\n--- Akhir Slide ---\n`;
-          }
-          setInput(prev => prev + textContent);
-        } catch (err: any) {
-          console.error("File Conversion Error", err);
-          alert(`Gagal membaca file ${file.name}`);
-        }
-      }
-      setIsLoading(false);
     }
   };
 
@@ -562,7 +611,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   // Shared Logic for processing files for Notes (used by Input & Drop)
   const processNoteFiles = async (rawFiles: File[]) => {
     const visualFiles = rawFiles.filter(isVisualFile);
-    const textFiles = rawFiles.filter(f => isDocxFile(f) || isPptxFile(f));
+    // Updated filter to include all text docs
+    const textFiles = rawFiles.filter(isTextDocument);
     
     if (visualFiles.length === 0 && textFiles.length === 0) {
         return;
@@ -571,20 +621,23 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     setIsCreatingNote(true);
 
     let contextFromTextFiles = "";
-    const sourceNames: string[] = [];
-
+    
+    // Process text-based files
     if (textFiles.length > 0) {
         for (const file of textFiles) {
-            sourceNames.push(file.name);
             try {
+                let extracted = "";
                 if (isDocxFile(file)) {
                     const arrayBuffer = await file.arrayBuffer();
                     const result = await mammoth.extractRawText({ arrayBuffer });
-                    contextFromTextFiles += `\n\nDokumen ${file.name}:\n${result.value}`;
+                    extracted = result.value;
                 } else if (isPptxFile(file)) {
-                    const extracted = await extractTextFromPptx(file);
-                    contextFromTextFiles += `\n\nSlide ${file.name}:\n${extracted}`;
+                    extracted = await extractTextFromPptx(file);
+                } else if (isLegacyBinaryFile(file)) {
+                    extracted = await extractTextFromBinary(file);
                 }
+                
+                contextFromTextFiles += `\n\nDokumen ${file.name}:\n${extracted}`;
             } catch (err: any) {
                 console.error("Note Text Extraction Error", err);
                 alert(`Gagal membaca file ${file.name}`);
@@ -592,8 +645,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         }
     }
 
-    const processedFiles: VisionFile[] = await Promise.all(visualFiles.map(file => {
-        sourceNames.push(file.name);
+    // Convert VISUAL files to Base64 (for AI Vision + Storage)
+    const processedVisualFiles: VisionFile[] = await Promise.all(visualFiles.map(file => {
         return new Promise<VisionFile>((resolve) => {
             const reader = new FileReader();
             reader.onload = () => {
@@ -606,15 +659,44 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
         });
     }));
 
-    const { title, content, quiz } = await generateNoteSummary(processedFiles, contextFromTextFiles);
+    // Convert TEXT files to Base64 (for Storage/Display ONLY - not sent to Vision API)
+    const processedTextFiles: VisionFile[] = await Promise.all(textFiles.map(file => {
+        return new Promise<VisionFile>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const res = reader.result as string;
+                // Ensure proper mime type for storage if browser defaults to octet-stream
+                let mimeType = res.split(';')[0].split(':')[1];
+                if (!mimeType || mimeType === 'application/octet-stream') {
+                   if (file.name.endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                   if (file.name.endsWith('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+                   if (file.name.endsWith('.doc')) mimeType = 'application/msword';
+                   if (file.name.endsWith('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
+                }
+                const data = res.split(',')[1];
+                resolve({ data, mimeType });
+            };
+            reader.readAsDataURL(file);
+        });
+    }));
+
+    // Generate Summary using Visual Files + Extracted Text
+    const { title, content, quiz } = await generateNoteSummary(processedVisualFiles, contextFromTextFiles);
     
     const newNote: Note = {
         id: Date.now().toString(),
         title: title || `Catatan ${new Date().toLocaleDateString()}`,
         content: content,
         quiz: quiz,
-        originalFiles: processedFiles.map(f => `data:${f.mimeType};base64,${f.data}`),
-        sourceFileNames: sourceNames,
+        // Store BOTH visual and text files so they appear in the UI
+        originalFiles: [
+            ...processedVisualFiles.map(f => `data:${f.mimeType};base64,${f.data}`),
+            ...processedTextFiles.map(f => `data:${f.mimeType};base64,${f.data}`)
+        ],
+        sourceFileNames: [
+            ...visualFiles.map(f => f.name),
+            ...textFiles.map(f => f.name)
+        ],
         createdAt: Date.now()
     };
 
@@ -1142,11 +1224,16 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                                         
                                         if (!isImage) {
                                             let iconColor = 'text-slate-400 dark:text-slate-500';
-                                            if (mime.includes('pdf')) iconColor = 'text-red-500';
+                                            let label = 'FILE';
+                                            
+                                            if (mime.includes('pdf')) { iconColor = 'text-red-500'; label = 'PDF'; }
+                                            else if (mime.includes('word') || mime.includes('officedocument.word') || mime.includes('msword')) { iconColor = 'text-blue-500'; label = 'DOC'; }
+                                            else if (mime.includes('presentation') || mime.includes('powerpoint') || mime.includes('vnd.ms-powerpoint')) { iconColor = 'text-orange-500'; label = 'PPT'; }
                                             
                                             return (
-                                                <div key={i} title={fileName} className={`w-12 h-12 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-center ${iconColor}`}>
+                                                <div key={i} title={fileName} className={`w-12 h-12 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center ${iconColor}`}>
                                                     <FileIcon />
+                                                    <span className="text-[8px] font-bold mt-0.5">{label}</span>
                                                 </div>
                                             );
                                         }
