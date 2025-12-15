@@ -4,15 +4,14 @@ import react from '@vitejs/plugin-react';
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
-  // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
   const env = loadEnv(mode, '.', '');
 
   return {
     plugins: [react()],
     define: {
-      // Secara eksplisit mendefinisikan process.env agar bisa dibaca di kode client-side
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      'process.env.GOOGLE_CLIENT_ID': JSON.stringify(env.GOOGLE_CLIENT_ID),
+      // Ensure values are strings (fallback to empty string) to prevent 'undefined' replacement issues
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || ''),
+      'process.env.GOOGLE_CLIENT_ID': JSON.stringify(env.GOOGLE_CLIENT_ID || ''),
     },
   };
 });

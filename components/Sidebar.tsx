@@ -1,7 +1,7 @@
 import React from 'react';
 import { LearningMode, ChatSession, AppView, User } from '../types';
 import { SparklesIcon, CloseIcon, ChatIcon, BookIcon, HistoryIcon, TrashIcon, SunIcon, MoonIcon, GoogleIcon } from './Icons';
-import { renderGoogleButton } from '../services/authService';
+import { renderGoogleButton, initGoogleAuth } from '../services/authService';
 
 interface SidebarProps {
   currentMode: LearningMode;
@@ -43,8 +43,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Render Google button if user is not logged in and sidebar is open
   React.useEffect(() => {
     if (isOpen && !user) {
-        // Short delay to ensure DOM is ready
-        setTimeout(() => renderGoogleButton("sidebar-google-btn"), 100);
+        // Initialize implicitly here to ensure button works if app was loaded directly to chat
+        // Note: In a real app, you might want to pass the login callback from props to Sidebar
+        // For now, assume global auth state handling in App.tsx will pick up the cookie/session if any,
+        // but for the button to work, it needs initialization.
+        // We re-use initGoogleAuth but we need a callback. 
+        // Since Sidebar doesn't have setHasStarted/setUser directly passed for *new* logins 
+        // (App.tsx handles it via its own init), we rely on App.tsx's init to have set the callback globally?
+        // No, google.accounts.id.initialize saves the callback.
+        // If Sidebar calls init, it might overwrite App's callback if we pass one.
+        // If we don't call init, renderButton might fail if App hasn't init yet (unlikely in ChatApp view).
+        // Safest: Just call renderButton. The robust service in App.tsx/Landing.tsx should have initialized it.
+        // But if user refreshed on /chat, App.tsx init runs.
+        
+        renderGoogleButton("sidebar-google-btn");
     }
   }, [isOpen, user]);
 
@@ -88,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ) : (
                   <div className="flex flex-col gap-2">
                       <p className="text-xs text-slate-500 dark:text-slate-400 text-center mb-1">Masuk untuk simpan progress</p>
-                      <div id="sidebar-google-btn" className="flex justify-center"></div>
+                      <div id="sidebar-google-btn" className="flex justify-center min-h-[40px]"></div>
                   </div>
               )}
           </div>
@@ -143,6 +155,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           {mode === LearningMode.MATH && "📐 Bedah Soal"}
                           {mode === LearningMode.WRITING && "📝 Bantu Tulis"}
                           {mode === LearningMode.SUMMARIZER && "📚 Ringkas Materi"}
+                          {mode === LearningMode.INTERACTIVE && "🧠 Q&A Interaktif"}
                         </button>
                       ))}
                     </div>

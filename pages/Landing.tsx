@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
 import { SparklesIcon, SunIcon, MoonIcon } from '../components/Icons';
-import { renderGoogleButton } from '../services/authService';
+import { renderGoogleButton, initGoogleAuth } from '../services/authService';
 import { User } from '../types';
 
 interface LandingProps {
   onStart: () => void;
-  onSignIn: (user: User) => void; // Callback when sign in occurs here
+  onSignIn: (user: User) => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
 }
@@ -13,8 +13,12 @@ interface LandingProps {
 export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, toggleTheme }) => {
   
   useEffect(() => {
+      // Initialize auth with the sign-in callback specific to Landing
+      // The robust service handles script loading and race conditions
+      initGoogleAuth(onSignIn);
       renderGoogleButton("google-btn-container");
-  }, []);
+      renderGoogleButton("google-btn-container-mobile");
+  }, [onSignIn]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
@@ -31,7 +35,7 @@ export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, togg
             >
                 {theme === 'light' ? <MoonIcon /> : <SunIcon />}
             </button>
-            <div id="google-btn-container" className="hidden md:block"></div>
+            <div id="google-btn-container" className="hidden md:block min-h-[40px] min-w-[200px]"></div>
             {/* Fallback button if GSI fails or user wants to skip */}
             <button 
             onClick={onStart}
@@ -68,7 +72,7 @@ export const Landing: React.FC<LandingProps> = ({ onStart, onSignIn, theme, togg
             </button>
             
             <div className="md:hidden mt-4">
-                <div id="google-btn-container-mobile"></div>
+                <div id="google-btn-container-mobile" className="min-h-[40px]"></div>
             </div>
         </div>
 

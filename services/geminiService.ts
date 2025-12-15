@@ -3,8 +3,19 @@ import { Message, LearningMode, VisionFile, QuizQuestion } from "../types";
 // @ts-ignore
 import JSON5 from "json5";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize Gemini Client Safely
+// This prevents the app from crashing (white screen) if the API key is not yet set in Vercel.
+let ai: GoogleGenAI | null = null;
+try {
+    const apiKey = process.env.API_KEY;
+    if (apiKey && apiKey.length > 0 && apiKey !== 'undefined') {
+        ai = new GoogleGenAI({ apiKey });
+    } else {
+        console.warn("PintarAI: API Key belum ditemukan. Fitur AI tidak akan berjalan sampai API Key di-set di Vercel.");
+    }
+} catch (error) {
+    console.error("Failed to initialize Gemini Client:", error);
+}
 
 const getSystemInstruction = (mode: LearningMode): string => {
   const base = "Kamu adalah PintarAI, asisten belajar yang cerdas, ramah, dan sangat membantu untuk siswa di Indonesia. Gunakan Bahasa Indonesia yang formal namun santai. Gunakan Markdown yang rapi.";
@@ -42,6 +53,12 @@ export const streamGeminiResponse = async (
   onChunk: (text: string) => void,
   onFinish?: (usage: { promptTokens: number; responseTokens: number; totalTokens: number }) => void
 ) => {
+  // Check if AI is initialized
+  if (!ai) {
+      onChunk("⚠️ **Sistem Error**: API Key belum dikonfigurasi.\n\nMohon buka Dashboard Vercel project ini, lalu masuk ke **Settings > Environment Variables**, dan tambahkan key `API_KEY` dengan API Key Google AI Studio anda. Jangan lupa redeploy!");
+      return;
+  }
+
   const isComplex = mode === LearningMode.MATH || mode === LearningMode.INTERACTIVE;
   const model = isComplex ? "gemini-3-pro-preview" : "gemini-2.5-flash";
 
@@ -106,7 +123,7 @@ export const streamGeminiResponse = async (
     }
   } catch (error) {
     console.error("Gemini API Error:", error);
-    onChunk("\n\n*Maaf, terjadi kesalahan saat menghubungi server AI. Mohon coba lagi nanti.*");
+    onChunk("\n\n*Maaf, terjadi kesalahan saat menghubungi server AI. Mohon cek koneksi atau API Key Anda.*");
   }
 };
 
@@ -115,6 +132,14 @@ export const generateNoteSummary = async (
   images: VisionFile[],
   contextText: string = ""
 ): Promise<{ title: string, content: string, quiz: QuizQuestion[] }> => {
+  if (!ai) {
+      return {
+          title: "Error Konfigurasi",
+          content: "API Key belum di-setting di Vercel. Mohon tambahkan Environment Variable `API_KEY`.",
+          quiz: []
+      };
+  }
+
   const model = "gemini-2.5-flash";
   
   const parts: Part[] = [];
@@ -204,6 +229,8 @@ export const generateNoteSummary = async (
 export const regenerateQuiz = async (
   content: string
 ): Promise<QuizQuestion[]> => {
+  if (!ai) return [];
+
   const model = "gemini-2.5-flash";
   
   const prompt = `Berdasarkan rangkuman materi berikut, buatlah 10 (SEPULUH) soal kuis pilihan ganda BARU yang berbeda dari sebelumnya jika memungkinkan.
