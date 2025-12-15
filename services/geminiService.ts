@@ -43,17 +43,31 @@ const getSystemInstruction = (mode: LearningMode): string => {
     case LearningMode.INTERACTIVE:
       return `${base} Kamu adalah tutor interaktif. Jelaskan konsep yang ditanyakan pengguna dengan jelas dan menarik. SETELAH penjelasan selesai, kamu WAJIB memberikan kuis singkat berupa 1-3 pertanyaan pilihan ganda (A, B, C, D) untuk menguji pemahaman siswa tentang topik tersebut.`;
     case LearningMode.SUMMARIZER:
-      return `${base} Tugasmu adalah merangkum materi pelajaran menjadi catatan yang SANGAT RAPI, TERSTRUKTUR, dan LENGKAP, mirip dengan format buku teks atau catatan siswa teladan.
+      return `${base} Tugasmu adalah merangkum materi pelajaran menjadi MODUL PEMBELAJARAN LENGKAP. Jangan membuat ringkasan yang terlalu singkat.
       
-      ATURAN FORMAT WAJIB (Ikuti gaya ini):
-      1. **Judul Bab/Topik**: Gunakan Heading 2 (##) atau Heading 3 (###).
-      2. **Poin Utama**: Gunakan Numbered List (1, 2, 3).
-         - Format baris harus: **Istilah/Konsep Penting**: Penjelasan detail.
-      3. **Sub-poin**: Jika ada detail lebih lanjut, gunakan bullet points (-) di bawah nomor.
-      4. **Contoh**: Berikan bagian khusus "Contoh" atau "Implementasi" agar mudah dimengerti.
-      5. **Hierarki**: Pastikan hierarki informasi jelas (Misal: Definisi -> Ciri-ciri -> Contoh).
-      
-      JANGAN buat paragraf panjang yang membosankan. Pecah menjadi poin-poin yang mudah dibaca (scannable).`;
+      ATURAN FORMAT WAJIB:
+      1. **Judul Bab/Topik**: Gunakan Heading 2 (##).
+      2. **Poin Utama (MENDALAM)**: 
+         - Gunakan Numbered List. 
+         - Jelaskan setiap poin dengan PARAGRAF DESKRIPTIF (minimal 3-5 kalimat per poin). 
+         - Jelaskan "Mengapa" dan "Bagaimana", jangan hanya definisi singkat.
+         - Gunakan analogi yang mudah dimengerti jika konsepnya sulit.
+      3. **CONTOH PROGRAM (LENGKAP DENGAN OUTPUT)**: 
+         - JIKA materi berkaitan dengan Pemrograman/Algoritma/IT, kamu WAJIB memberikan contoh kode.
+         - **BAHASA WAJIB**: Berikan contoh dalam 3 bahasa: **C**, **COBOL**, dan **C++** (JANGAN gunakan Python).
+         - **OUTPUT WAJIB**: Di bawah SETIAP blok kode program, kamu WAJIB membuat blok kode terpisah yang berisi **HASIL OUTPUT** dari program tersebut. Gunakan label "Output:" sebelum blok kode output.
+         - Format:
+           (Penjelasan singkat)
+           \`\`\`c
+           // Kode C
+           printf("Hello");
+           \`\`\`
+           **Output Program:**
+           \`\`\`text
+           Hello
+           \`\`\`
+      4. **Studi Kasus**: Jika bukan coding, berikan contoh penerapan nyata.
+      5. **Hierarki**: Pastikan struktur jelas, gunakan Sub-heading (###) untuk memecah topik panjang.`;
     case LearningMode.WRITING:
       return `${base} Kamu membantu siswa menulis esai. Berikan feedback konstruktif, saran perbaikan tata bahasa, dan ide pengembangan paragraf.`;
     case LearningMode.GENERAL:
@@ -185,22 +199,27 @@ export const generateNoteSummary = async (
 
   const prompt = `Analisis materi yang diberikan (baik dari gambar atau teks tambahan).
   1. Identifikasi topik utama untuk dijadikan judul yang singkat dan jelas.
-  2. Buatlah rangkuman catatan belajar yang lengkap, terstruktur, dan mudah dipahami dalam format Markdown. 
-     - Gunakan gaya penulisan: 1. **Konsep**: Penjelasan.
-     - Sertakan contoh nyata.
+  2. Buatlah MODUL BELAJAR LENGKAP & MENDALAM.
+     - **Penjelasan Detail (WAJIB PANJANG)**: Penjelasan harus berbentuk narasi paragraf yang panjang dan mendalam. Hindari penggunaan poin-poin yang terlalu singkat. Jelaskan definisi, latar belakang, cara kerja, dan alasan mengapa konsep ini penting. Anggap pembaca adalah pemula yang butuh penjelasan tuntas.
+     - **Struktur**: Gunakan Heading (##) dan Sub-heading (###) agar rapi.
+     - **CONTOH PROGRAM (WAJIB ADA)**: JIKA materi berkaitan dengan Algoritma, Pemrograman, atau Komputer:
+        a. Kamu WAJIB memberikan contoh kode lengkap dalam 3 bahasa: **C**, **COBOL**, dan **C++**.
+        b. **JANGAN gunakan Python**.
+        c. **OUTPUT WAJIB**: Di bawah SETIAP blok kode program, buatlah blok kode terpisah dengan label "Output Program" yang berisi hasil eksekusi program tersebut. Gunakan format code block \`text\` untuk output.
+        d. Berikan penjelasan logika di setiap baris kode yang krusial.
+     - **Contoh Kasus**: Jika materi Sains/Matematika, berikan contoh perhitungan langkah demi langkah.
   3. Buatlah Kuis Evaluasi:
      - BAGIAN A: ${mcqCount} Soal Pilihan Ganda (Multiple Choice).
-       - Sertakan opsi A, B, C, D.
-       - Kunci jawaban dan penjelasan singkat.
      - BAGIAN B: ${essayCount} Soal Esai (Uraian).
-       - Soal yang menguji pemahaman mendalam.
-       - Sertakan "Kunci Jawaban/Poin Penting" untuk referensi penilaian mandiri.
+     - **KHUSUS MATERI IT/PEMROGRAMAN (WAJIB)**: 
+       - Pada Bagian B (Esai), kamu WAJIB menyertakan soal **"Lengkapi Kode" (Code Completion)** atau **"Analisis Kode"**.
+       - Sertakan potongan kode (snippet) di dalam teks soal (gunakan format markdown \`\`\`) yang memiliki bagian rumpang atau bug.
+       - Minta siswa melengkapi atau memperbaiki kode tersebut.
   
   IMPORTANT RESPONSE FORMAT RULES:
   - Output MUST be strictly valid JSON.
-  - Separate MCQ and Essay questions in the JSON structure as shown in schema.
-  - When writing Math or LaTeX (e.g., inside 'content' or 'question'), you MUST escape backslashes properly for JSON strings.
-    Example: use "\\\\frac{a}{b}" instead of "\\frac{a}{b}".
+  - Separate MCQ and Essay questions in the JSON structure.
+  - Escape backslashes properly for JSON strings (e.g. LaTeX).
 
   ${contextText ? `\nTambahan konteks dari dokumen:\n${contextText}` : ''}`;
 
@@ -295,6 +314,11 @@ export const regenerateQuiz = async (
   const prompt = `Berdasarkan rangkuman materi berikut, buatlah kuis evaluasi campuran:
   1. 5 Soal Pilihan Ganda (MCQ).
   2. 2 Soal Esai.
+  
+  ATURAN KHUSUS (WAJIB):
+  - Jika materi berhubungan dengan Pemrograman/IT:
+    Buatlah soal esai berupa **STUDI KASUS KODE**.
+    Berikan snippet kode singkat dalam pertanyaan (gunakan markdown), lalu minta siswa melengkapi kode yang rumpang atau menebak outputnya.
   
   MATERI:
   ${content}

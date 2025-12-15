@@ -278,7 +278,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
   };
   
   const isTextDocument = (file: File) => {
-      return isDocxFile(file) || isPptxFile(file) || isLegacyBinaryFile(file);
+      return isDocxFile(file) || isPptxFile(file) || isLegacyBinaryFile(file) || file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
   };
 
   // Robust Binary Extractor using TextDecoder
@@ -377,6 +377,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
              }
           } else if (isPptxFile(file)) {
              textContent = await extractTextFromPptx(file);
+          } else if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+             textContent = await file.text();
           } else {
              // Fallback for .doc, .ppt, and unknown types (explicitly handles msword)
              textContent = await extractTextFromBinary(file);
@@ -608,11 +610,32 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
 
   // Shared Logic for processing files for Notes (used by Input & Drop)
   const processNoteFiles = async (rawFiles: File[]) => {
-    const visualFiles = rawFiles.filter(isVisualFile);
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.txt'];
+    const invalidFiles: string[] = [];
+    const validFiles: File[] = [];
+
+    // Validation Check
+    for (const file of rawFiles) {
+        const name = file.name.toLowerCase();
+        const hasValidExt = validExtensions.some(ext => name.endsWith(ext));
+        
+        if (hasValidExt) {
+            validFiles.push(file);
+        } else {
+            invalidFiles.push(file.name);
+        }
+    }
+
+    if (invalidFiles.length > 0) {
+        alert(`File berikut tidak didukung:\n${invalidFiles.join('\n')}\n\nHanya mendukung format: JPG, PNG, PDF, DOC, DOCX, PPT, PPTX, TXT.`);
+        if (validFiles.length === 0) return;
+    }
+
+    const visualFiles = validFiles.filter(isVisualFile);
     // Updated filter to include all text docs, handling MS Word explicitly
     const textFiles = [];
-    for (const f of rawFiles) {
-        if (isTextDocument(f) || f.type === 'application/msword') {
+    for (const f of validFiles) {
+        if (isTextDocument(f)) {
             textFiles.push(f);
         }
     }
@@ -641,9 +664,10 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                     }
                 } else if (isPptxFile(file)) {
                     extracted = await extractTextFromPptx(file);
+                } else if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+                    extracted = await file.text();
                 } else {
                     // Fallback for .doc, .ppt, and unknown types
-                    console.log("Processing legacy/binary file:", file.name);
                     extracted = await extractTextFromBinary(file);
                 }
                 
@@ -687,6 +711,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                    if (file.name.endsWith('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
                    if (file.name.endsWith('.doc')) mimeType = 'application/msword';
                    if (file.name.endsWith('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
+                   if (file.name.endsWith('.txt')) mimeType = 'text/plain';
                 }
                 const data = res.split(',')[1];
                 resolve({ data, mimeType });
@@ -697,7 +722,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
 
     // Generate Summary using Visual Files + Extracted Text
     // PASS FILE COUNT HERE
-    const { title, content, quiz } = await generateNoteSummary(processedVisualFiles, contextFromTextFiles, rawFiles.length);
+    const { title, content, quiz } = await generateNoteSummary(processedVisualFiles, contextFromTextFiles, validFiles.length);
     
     const newNote: Note = {
         id: Date.now().toString(),
@@ -766,7 +791,9 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
             ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
                     {mime.startsWith('audio/') ? <MicIcon /> : <FileIcon />}
-                    <span className="text-[9px] font-bold mt-1 uppercase truncate w-full text-center px-1">{mime.split('/')[1] || 'FILE'}</span>
+                    <span className="text-[9px] font-bold mt-1 uppercase truncate w-full text-center px-1">
+                        {mime === 'text/plain' ? 'TXT' : mime.split('/')[1] || 'FILE'}
+                    </span>
                 </div>
             )}
             <button 
@@ -1113,7 +1140,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                         ref={fileInputRef}
                         onChange={handleFileSelect}
                         className="hidden" 
-                        accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, .mp4, .webm, .mov, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, video/*"
+                        accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, .txt, .mp4, .webm, .mov, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, text/plain, video/*"
                       />
 
                       <button
@@ -1203,7 +1230,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                                 ref={noteFileInputRef}
                                 onChange={handleCreateNote}
                                 className="hidden" 
-                                accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                                accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, .txt, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, text/plain"
                               />
                         </div>
                     </div>
@@ -1245,6 +1272,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
                                             if (mime.includes('pdf')) { iconColor = 'text-red-500'; label = 'PDF'; }
                                             else if (mime.includes('word') || mime.includes('officedocument.word') || mime.includes('msword')) { iconColor = 'text-blue-500'; label = 'DOC'; }
                                             else if (mime.includes('presentation') || mime.includes('powerpoint') || mime.includes('vnd.ms-powerpoint')) { iconColor = 'text-orange-500'; label = 'PPT'; }
+                                            else if (mime === 'text/plain') { iconColor = 'text-slate-600 dark:text-slate-300'; label = 'TXT'; }
                                             
                                             return (
                                                 <div key={i} title={fileName} className={`w-12 h-12 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center ${iconColor}`}>

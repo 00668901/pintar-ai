@@ -8,7 +8,7 @@ import mammoth from 'mammoth';
 // @ts-ignore
 import JSZip from 'jszip';
 import { Note, QuizQuestion } from '../types';
-import { CloseIcon, CheckIcon, FileIcon, ReloadIcon, SparklesIcon, BookIcon, TrashIcon, PlusIcon } from '../components/Icons';
+import { CloseIcon, CheckIcon, FileIcon, ReloadIcon, SparklesIcon, BookIcon, TrashIcon, PlusIcon, SortIcon, CopyIcon } from '../components/Icons';
 import { regenerateQuiz } from '../services/geminiService';
 
 interface NoteDetailPageProps {
@@ -18,29 +18,96 @@ interface NoteDetailPageProps {
     onDeleteNote: (id: string, title: string) => void;
 }
 
+// --- Custom Markdown Components ---
+
+const CustomPre = ({ children }: any) => {
+    // Try to detect language from child code element class
+    let lang = 'Code';
+    let isOutput = false;
+    let content = '';
+
+    if (children && children.props) {
+        content = children.props.children || '';
+        const className = children.props.className || '';
+        const match = /language-(\w+)/.exec(className);
+        if (match) {
+            lang = match[1].toUpperCase();
+            if (lang === 'TEXT' || lang === 'PLAINTEXT') {
+                // Heuristic: if it's explicitly text/plaintext, treat as output/terminal
+                isOutput = true; 
+                lang = 'OUTPUT';
+            }
+        }
+    }
+
+    const [copied, setCopied] = useState(false);
+    const handleCopy = () => {
+        navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    if (isOutput) {
+        return (
+            <div className="my-6 rounded-xl overflow-hidden bg-[#1e1e1e] border border-slate-700 shadow-lg">
+                <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-slate-600">
+                    <span className="text-xs font-mono font-bold text-green-400 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        TERMINAL OUTPUT
+                    </span>
+                </div>
+                <div className="p-4 overflow-x-auto">
+                    <pre className="font-mono text-sm leading-relaxed text-slate-300">
+                        {children}
+                    </pre>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="my-8 rounded-xl overflow-hidden bg-[#0d1117] border border-slate-800 shadow-xl group">
+            <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-slate-800/50">
+                <div className="flex items-center gap-2">
+                    <div className="flex gap-1.5">
+                        <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
+                        <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                        <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                    </div>
+                    <span className="ml-3 text-xs font-mono font-bold text-slate-400 uppercase">{lang}</span>
+                </div>
+                <button 
+                    onClick={handleCopy}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-800 transition-colors text-xs text-slate-400 hover:text-white"
+                >
+                    {copied ? <CheckIcon /> : <CopyIcon />}
+                    {copied ? 'Copied' : 'Copy'}
+                </button>
+            </div>
+            <div className="p-5 overflow-x-auto">
+                <pre className="font-mono text-sm leading-loose text-slate-200">
+                    {children}
+                </pre>
+            </div>
+        </div>
+    );
+};
+
 // --- FILE HELPERS (Duplicated from ChatApp for portability) ---
 const isDocxFile = (file: File) => {
     const name = file.name.toLowerCase();
     const type = file.type;
-    // Strict exclusion of MS Word binary type and .doc extension to prevent Mammoth errors
     if (type === 'application/msword' || name.endsWith('.doc')) return false;
     return type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx');
 };
 
 const isPptxFile = (file: File) => file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.toLowerCase().endsWith('.pptx');
 
-const isLegacyBinaryFile = (file: File) => {
-    const name = file.name.toLowerCase();
-    const type = file.type;
-    return type === 'application/msword' || type === 'application/vnd.ms-powerpoint' || name.endsWith('.doc') || name.endsWith('.ppt');
-};
-
 const extractTextFromBinary = async (file: File): Promise<string> => {
     try {
         const buffer = await file.arrayBuffer();
         const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
         const text = decoder.decode(buffer);
-        // Matches strings of 4+ printable chars
         const matches = text.match(/[A-Za-z0-9\s.,?!@#$%^&*()_\-+=[\]{}|\\:;"'<>/]{4,}/g);
         if (matches && matches.length > 0) {
             return matches.join(' ');
@@ -96,6 +163,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
     const [showResults, setShowResults] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
     const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+    const [fileSort, setFileSort] = useState<'name-asc' | 'name-desc' | 'date-new' | 'date-old'>('date-old');
     
     // Edit State
     const [isEditing, setIsEditing] = useState(false);
@@ -221,6 +289,8 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                      }
                 } else if (isPptxFile(file)) {
                     text = await extractTextFromPptx(file);
+                } else if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+                    text = await file.text();
                 } else {
                      // Fallback for unknown text types or misidentified types including msword
                      text = await extractTextFromBinary(file);
@@ -261,6 +331,47 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
         };
         onUpdateNote(updatedNote);
         setIsEditing(false);
+    };
+
+    // Memoized sorted files for display
+    const sortedFiles = useMemo(() => {
+        const files = isEditing ? editedFiles : note.originalFiles;
+        const names = isEditing ? editedSourceNames : note.sourceFileNames;
+        
+        // Combine data for sorting
+        const combined = files.map((f, i) => ({
+            data: f,
+            name: names?.[i] || `File ${i+1}`,
+            originalIndex: i
+        }));
+
+        switch (fileSort) {
+            case 'name-asc':
+                return combined.sort((a, b) => a.name.localeCompare(b.name));
+            case 'name-desc':
+                return combined.sort((a, b) => b.name.localeCompare(a.name));
+            case 'date-new': // Reverses the array (assuming higher index = newer)
+                return combined.reverse();
+            case 'date-old':
+            default:
+                return combined;
+        }
+    }, [isEditing, editedFiles, editedSourceNames, note.originalFiles, note.sourceFileNames, fileSort]);
+
+    // Markdown render components for Questions
+    const questionRenderComponents = {
+        code: ({node, inline, className, children, ...props}: any) => {
+            const match = /language-(\w+)/.exec(className || '');
+            if (!inline) {
+               return <code className={className} {...props}>{children}</code>;
+            }
+            return (
+               <code className="bg-slate-100 dark:bg-slate-800 text-pink-600 dark:text-pink-400 px-2 py-1 rounded-md text-sm font-mono border border-slate-200 dark:border-slate-700 mx-1" {...props}>
+                   {children}
+               </code>
+            );
+        },
+        pre: CustomPre
     };
 
     return (
@@ -368,29 +479,52 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                          <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                              <FileIcon /> Sumber Materi
                                          </h4>
-                                         {isEditing && (
-                                             <button 
-                                                onClick={() => editFileInputRef.current?.click()}
-                                                disabled={isProcessingFiles}
-                                                className="flex items-center gap-1 text-primary-600 text-xs font-bold hover:underline disabled:opacity-50"
-                                             >
-                                                {isProcessingFiles ? (
-                                                    <span className="animate-pulse">Sedang Ekstrak Teks...</span>
-                                                ) : (
-                                                    <>+ Tambah File</>
-                                                )}
-                                             </button>
-                                         )}
+                                         
+                                         <div className="flex items-center gap-3">
+                                             {/* Sort Controls */}
+                                             <div className="relative group">
+                                                 <select 
+                                                     value={fileSort}
+                                                     onChange={(e) => setFileSort(e.target.value as any)}
+                                                     className="appearance-none bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 pl-8 pr-8 py-1.5 rounded-lg text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary-500 cursor-pointer border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                                                 >
+                                                     <option value="date-old">Urut: Terlama</option>
+                                                     <option value="date-new">Urut: Terbaru</option>
+                                                     <option value="name-asc">Nama (A-Z)</option>
+                                                     <option value="name-desc">Nama (Z-A)</option>
+                                                 </select>
+                                                 <div className="absolute left-2.5 top-1.5 text-slate-400 pointer-events-none scale-75">
+                                                     <SortIcon />
+                                                 </div>
+                                             </div>
+
+                                             {isEditing && (
+                                                 <button 
+                                                    onClick={() => editFileInputRef.current?.click()}
+                                                    disabled={isProcessingFiles}
+                                                    className="flex items-center gap-1 text-primary-600 text-xs font-bold hover:underline disabled:opacity-50"
+                                                 >
+                                                    {isProcessingFiles ? (
+                                                        <span className="animate-pulse">Sedang Ekstrak Teks...</span>
+                                                    ) : (
+                                                        <>+ Tambah File</>
+                                                    )}
+                                                 </button>
+                                             )}
+                                         </div>
                                      </div>
                                      
                                      {/* Grid Layout for Source Files */}
                                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                         {(isEditing ? editedFiles : note.originalFiles).map((file, i) => {
+                                         {sortedFiles.map((fileItem, i) => {
+                                             const file = fileItem.data;
+                                             const fileName = fileItem.name;
                                              const mime = file.match(/:(.*?);/)?.[1] || '';
-                                             const fileName = (isEditing ? editedSourceNames : note.sourceFileNames)?.[i] || `File ${i+1}`;
+                                             
                                              const isPdf = mime.includes('pdf') || fileName.endsWith('.pdf');
                                              const isDoc = mime.includes('word') || fileName.endsWith('.doc') || fileName.endsWith('.docx');
                                              const isPpt = mime.includes('presentation') || mime.includes('powerpoint') || mime.includes('vnd.ms-powerpoint') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx');
+                                             const isTxt = mime === 'text/plain' || fileName.endsWith('.txt');
                                              
                                              let bgClass = "bg-slate-100 dark:bg-slate-800/50";
                                              let textClass = "text-slate-500 dark:text-slate-400";
@@ -408,6 +542,10 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                 bgClass = "bg-orange-50 dark:bg-orange-900/10 border-orange-100 dark:border-orange-900/30";
                                                 textClass = "text-orange-500 dark:text-orange-400";
                                                 label = "PPT";
+                                             } else if (isTxt) {
+                                                bgClass = "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700";
+                                                textClass = "text-slate-600 dark:text-slate-300";
+                                                label = "TXT";
                                              }
 
                                              return (
@@ -428,7 +566,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
 
                                                      {isEditing && (
                                                          <button 
-                                                             onClick={(e) => { e.stopPropagation(); handleRemoveFile(i); }}
+                                                             onClick={(e) => { e.stopPropagation(); handleRemoveFile(fileItem.originalIndex); }}
                                                              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 z-10 scale-90 hover:scale-100 transition-transform"
                                                          >
                                                              <CloseIcon />
@@ -462,7 +600,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                         className="hidden" 
                                         ref={editFileInputRef} 
                                         onChange={handleAddFile} 
-                                        accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                                        accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .doc, .pptx, .ppt, .txt, application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, text/plain"
                                      />
                                  </div>
                              )}
@@ -484,16 +622,28 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                  rehypePlugins={[rehypeKatex]}
                                                  components={{
                                                      // Typography styling to match modern clean reading experience
-                                                     h1: ({children}) => <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-8 pb-6 border-b border-slate-100 dark:border-slate-800">{children}</h1>,
-                                                     h2: ({children}) => <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-12 mb-6 tracking-tight">{children}</h2>,
-                                                     h3: ({children}) => <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mt-10 mb-4">{children}</h3>,
-                                                     p: ({children}) => <p className="mb-6 leading-8 text-slate-600 dark:text-slate-300 text-[1.05rem]">{children}</p>,
-                                                     ul: ({children}) => <ul className="list-disc pl-6 mb-8 space-y-3 text-slate-600 dark:text-slate-300 leading-7">{children}</ul>,
-                                                     ol: ({children}) => <ol className="list-decimal pl-6 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-7">{children}</ol>,
-                                                     li: ({children}) => <li className="pl-2 mb-1">{children}</li>,
-                                                     strong: ({children}) => <strong className="font-bold text-slate-900 dark:text-slate-100">{children}</strong>,
-                                                     blockquote: ({children}) => <blockquote className="border-l-4 border-primary-500 pl-6 py-4 my-8 italic text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-r-xl shadow-sm">{children}</blockquote>,
-                                                     code: ({children}) => <code className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-2 py-1 rounded-md text-sm font-mono border border-slate-200 dark:border-slate-700 mx-1">{children}</code>
+                                                     h1: ({children}) => <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 dark:text-white mb-10 pb-6 border-b border-slate-100 dark:border-slate-800 tracking-tight leading-tight">{children}</h1>,
+                                                     h2: ({children}) => <h2 className="text-2xl md:text-3xl font-bold text-slate-800 dark:text-slate-100 mt-16 mb-8 tracking-tight">{children}</h2>,
+                                                     h3: ({children}) => <h3 className="text-xl md:text-2xl font-semibold text-slate-800 dark:text-slate-200 mt-12 mb-6">{children}</h3>,
+                                                     p: ({children}) => <p className="mb-8 leading-loose text-slate-600 dark:text-slate-300 text-lg">{children}</p>,
+                                                     ul: ({children}) => <ul className="list-disc pl-8 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-8 text-lg">{children}</ul>,
+                                                     ol: ({children}) => <ol className="list-decimal pl-8 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-8 text-lg">{children}</ol>,
+                                                     li: ({children}) => <li className="pl-2">{children}</li>,
+                                                     strong: ({children}) => <strong className="font-bold text-slate-900 dark:text-white">{children}</strong>,
+                                                     blockquote: ({children}) => <blockquote className="border-l-4 border-primary-500 pl-8 py-6 my-10 italic text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-r-2xl shadow-sm text-lg">{children}</blockquote>,
+                                                     code: ({node, inline, className, children, ...props}: any) => {
+                                                         const match = /language-(\w+)/.exec(className || '');
+                                                         if (!inline) {
+                                                            // Pass to pre for styling
+                                                            return <code className={className} {...props}>{children}</code>;
+                                                         }
+                                                         return (
+                                                            <code className="bg-slate-100 dark:bg-slate-800 text-pink-600 dark:text-pink-400 px-2 py-1 rounded-md text-sm font-mono border border-slate-200 dark:border-slate-700 mx-1" {...props}>
+                                                                {children}
+                                                            </code>
+                                                         );
+                                                     },
+                                                     pre: CustomPre
                                                  }}
                                              >
                                                  {formattedContent}
@@ -573,7 +723,15 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                                 </span>
                                                                 <div className="flex-1">
                                                                     <div className="flex justify-between items-start">
-                                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed">{q.question}</h3>
+                                                                        <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed markdown-body">
+                                                                            <ReactMarkdown 
+                                                                                remarkPlugins={[remarkGfm, remarkMath]} 
+                                                                                rehypePlugins={[rehypeKatex]}
+                                                                                components={questionRenderComponents}
+                                                                            >
+                                                                                {q.question}
+                                                                            </ReactMarkdown>
+                                                                        </div>
                                                                         {userAnswer !== undefined && !showResults && (
                                                                             <button onClick={() => handleResetQuestion(idx)} className="text-slate-400 hover:text-primary-600">
                                                                                 <ReloadIcon />
@@ -629,7 +787,15 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                             </span>
                                                             <div className="flex-1 w-full">
                                                                 <span className="text-xs font-bold text-indigo-500 dark:text-indigo-400 mb-1 block uppercase tracking-wider">Soal Esai</span>
-                                                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed">{q.question}</h3>
+                                                                <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4 leading-relaxed markdown-body">
+                                                                    <ReactMarkdown 
+                                                                        remarkPlugins={[remarkGfm, remarkMath]} 
+                                                                        rehypePlugins={[rehypeKatex]}
+                                                                        components={questionRenderComponents}
+                                                                    >
+                                                                        {q.question}
+                                                                    </ReactMarkdown>
+                                                                </div>
                                                                 
                                                                 <textarea 
                                                                     className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none mb-4 resize-y min-h-[100px]"
