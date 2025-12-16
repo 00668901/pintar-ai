@@ -39,10 +39,9 @@ const getSystemInstruction = (mode: LearningMode): string => {
     case LearningMode.INTERACTIVE:
       return `${base} Jelaskan konsep. SETELAH penjelasan, WAJIB berikan 1-3 kuis pilihan ganda singkat.`;
     case LearningMode.SUMMARIZER:
-      return `${base} Rangkum materi menjadi MODUL LENGKAP.
-      - Gunakan Heading 2 (##) untuk Judul Bab.
-      - Penjelasan harus PARAGRAF DESKRIPTIF MENDALAM.
-      - JIKA MATERI IT/CODING: Wajib berikan contoh kode (C, COBOL, C++) dan BLOCK OUTPUT-nya.`;
+      return `${base} Rangkum materi menjadi MODUL PEMBELAJARAN MENDALAM.
+      - Penjelasan harus NARATIF, PANJANG, dan MENDETAIL (bukan hanya poin-poin).
+      - JIKA MATERI IT/CODING: Berikan HANYA 1 CONTOH KODE yang paling relevan per sub-topik. Sertakan blok OUTPUT programnya.`;
     case LearningMode.WRITING:
       return `${base} Bantu menulis esai dan feedback tata bahasa.`;
     case LearningMode.GENERAL:
@@ -169,19 +168,22 @@ export const generateNoteSummary = async (
   });
 
   const promptContent = `
-  Tugas: Analisis materi dan buat MODUL BELAJAR LENGKAP.
+  Tugas: Analisis materi dan buat MODUL PEMBELAJARAN MENDALAM & KOMPREHENSIF.
   
   Instruksi Format Output (PENTING):
   1. Baris Pertama WAJIB diawali dengan "JUDUL: " diikuti judul materi.
   2. Baris Kedua dan seterusnya adalah ISI MATERI dalam format Markdown.
   
   Instruksi Isi Materi:
-  - Buat penjelasan yang PANJANG, MENDALAM, dan NARATIF.
-  - Gunakan Heading (##, ###) yang rapi.
+  - **PENJELASAN**: Harus SANGAT PANJANG, MENDETAIL, dan NARATIF. Jangan hanya poin-poin singkat. Gunakan gaya bahasa buku teks akademik yang menjelaskan "Mengapa" dan "Bagaimana", bukan hanya "Apa". Minimal 3-4 paragraf tebal per sub-topik.
+  - **STRUKTUR**: Gunakan Heading 2 (##) untuk Bab Utama dan Heading 3 (###) untuk Sub-bab.
+  - **ANALOGI**: Berikan contoh dunia nyata atau analogi sederhana untuk konsep yang sulit.
+  
   - **KHUSUS MATERI PEMROGRAMAN/IT**:
-    a. WAJIB berikan contoh kode dalam 3 bahasa: **C**, **COBOL**, dan **C++** (Jangan Python).
-    b. Di bawah setiap kode, WAJIB buat blok kode terpisah untuk **OUTPUT PROGRAM**.
-    c. Berikan penjelasan logika kode.
+    a. **HANYA 1 CONTOH KODE** per bagian (Pilih bahasa yang paling relevan dengan konteks, misal Python, C++, atau Java). JANGAN berikan banyak versi bahasa.
+    b. Kode harus ditulis dalam blok code markdown yang rapi.
+    c. Di bawah kode, WAJIB buat blok kode terpisah dengan label "TERMINAL OUTPUT" untuk hasil eksekusinya.
+    d. **ANALISIS KODE**: Jelaskan logika kode tersebut baris demi baris secara mendalam.
   
   ${contextText ? `\nKonteks Tambahan:\n${contextText}` : ''}
   `;
