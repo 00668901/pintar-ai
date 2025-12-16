@@ -140,7 +140,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ user, onSignOut, theme, toggle
     e.preventDefault();
     setIsDragging(false);
     
-    const files = Array.from(e.dataTransfer.files);
+    const files = Array.from(e.dataTransfer.files) as File[];
     if (files.length === 0) return;
 
     if (view === 'chat') {
