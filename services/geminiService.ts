@@ -41,7 +41,7 @@ const getSystemInstruction = (mode: LearningMode): string => {
     case LearningMode.SUMMARIZER:
       return `${base} Rangkum materi menjadi MODUL PEMBELAJARAN MENDALAM.
       - Penjelasan harus NARATIF, PANJANG, dan MENDETAIL (bukan hanya poin-poin).
-      - JIKA MATERI IT/CODING: Berikan HANYA 1 CONTOH KODE yang paling relevan per sub-topik. Sertakan blok OUTPUT programnya.`;
+      - JIKA MATERI IT/CODING: Berikan contoh kode HANYA dalam bahasa **C** dan **COBOL**. Sertakan blok OUTPUT programnya.`;
     case LearningMode.WRITING:
       return `${base} Bantu menulis esai dan feedback tata bahasa.`;
     case LearningMode.GENERAL:
@@ -175,15 +175,14 @@ export const generateNoteSummary = async (
   2. Baris Kedua dan seterusnya adalah ISI MATERI dalam format Markdown.
   
   Instruksi Isi Materi:
-  - **PENJELASAN**: Harus SANGAT PANJANG, MENDETAIL, dan NARATIF. Jangan hanya poin-poin singkat. Gunakan gaya bahasa buku teks akademik yang menjelaskan "Mengapa" dan "Bagaimana", bukan hanya "Apa". Minimal 3-4 paragraf tebal per sub-topik.
+  - **PENJELASAN**: Harus SANGAT PANJANG, MENDETAIL, dan NARATIF. Jangan hanya poin-poin singkat. Gunakan gaya bahasa buku teks akademik yang menjelaskan "Mengapa" dan "Bagaimana". Minimal 3-4 paragraf tebal per sub-topik.
   - **STRUKTUR**: Gunakan Heading 2 (##) untuk Bab Utama dan Heading 3 (###) untuk Sub-bab.
-  - **ANALOGI**: Berikan contoh dunia nyata atau analogi sederhana untuk konsep yang sulit.
   
   - **KHUSUS MATERI PEMROGRAMAN/IT**:
-    a. **HANYA 1 CONTOH KODE** per bagian (Pilih bahasa yang paling relevan dengan konteks, misal Python, C++, atau Java). JANGAN berikan banyak versi bahasa.
+    a. **BAHASA PEMROGRAMAN**: WAJIB memberikan contoh kode HANYA dalam bahasa **C** dan **COBOL** untuk setiap konsep yang dijelaskan. (Jangan gunakan Python, Java, dll).
     b. Kode harus ditulis dalam blok code markdown yang rapi.
-    c. Di bawah kode, WAJIB buat blok kode terpisah dengan label "TERMINAL OUTPUT" untuk hasil eksekusinya.
-    d. **ANALISIS KODE**: Jelaskan logika kode tersebut baris demi baris secara mendalam.
+    c. Di bawah setiap kode, WAJIB buat blok kode terpisah dengan label "TERMINAL OUTPUT" untuk hasil eksekusinya.
+    d. **ANALISIS KODE**: Jelaskan logika kode C dan COBOL tersebut baris demi baris.
   
   ${contextText ? `\nKonteks Tambahan:\n${contextText}` : ''}
   `;
@@ -259,8 +258,9 @@ export const regenerateQuiz = async (
   2. **10 Soal Esai (Total)** dengan rincian:
      - **5 Soal Esai Teori**: Pertanyaan konseptual/analisis.
      - **5 Soal "Melengkapi Program" (Code Completion)**:
-       - **KHUSUS MATERI IT/CODING**: Berikan snippet kode dalam soal (gunakan format markdown \`\`\`) yang rumpang/hilang sebagian. Minta siswa melengkapi baris tersebut atau menebak outputnya.
-       - Jika materi NON-IT: Cukup berikan total 5 esai teori saja.
+       - **KHUSUS MATERI IT/CODING**: Berikan snippet kode dalam soal (gunakan format markdown \`\`\`) yang rumpang/hilang sebagian.
+       - **PENTING**: Gunakan bahasa **C** atau **COBOL** untuk soal melengkapi program.
+       - Minta siswa melengkapi baris tersebut atau menebak outputnya.
   
   IMPORTANT:
   - Output HARUS Valid JSON.
