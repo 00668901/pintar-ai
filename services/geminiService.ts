@@ -41,6 +41,7 @@ const getSystemInstruction = (mode: LearningMode): string => {
     case LearningMode.SUMMARIZER:
       return `${base} Rangkum materi menjadi MODUL PEMBELAJARAN MENDALAM.
       - Penjelasan harus NARATIF, PANJANG, dan MENDETAIL (bukan hanya poin-poin).
+      - Fokus pada KONSEP, LOGIKA, dan USE CASES, jangan hanya membahas tipe data/sintaks dasar.
       - JIKA MATERI IT/CODING: Berikan contoh kode HANYA dalam bahasa **C** dan **COBOL**. Sertakan blok OUTPUT programnya.`;
     case LearningMode.WRITING:
       return `${base} Bantu menulis esai dan feedback tata bahasa.`;
@@ -175,14 +176,19 @@ export const generateNoteSummary = async (
   2. Baris Kedua dan seterusnya adalah ISI MATERI dalam format Markdown.
   
   Instruksi Isi Materi:
-  - **PENJELASAN**: Harus SANGAT PANJANG, MENDETAIL, dan NARATIF. Jangan hanya poin-poin singkat. Gunakan gaya bahasa buku teks akademik yang menjelaskan "Mengapa" dan "Bagaimana". Minimal 3-4 paragraf tebal per sub-topik.
+  - **PENJELASAN**: Harus SANGAT PANJANG, MENDETAIL, dan NARATIF. 
+    - JANGAN hanya membahas Tipe Data atau Sintaks dasar.
+    - Jelaskan KONSEP, LOGIKA, ALGORITMA, SEJARAH, dan KEGUNAAN NYATA (Use Cases).
+    - Gunakan gaya bahasa buku teks akademik yang menjelaskan "Mengapa" dan "Bagaimana". 
+    - Minimal 3-4 paragraf tebal per sub-topik.
   - **STRUKTUR**: Gunakan Heading 2 (##) untuk Bab Utama dan Heading 3 (###) untuk Sub-bab.
   
   - **KHUSUS MATERI PEMROGRAMAN/IT**:
     a. **BAHASA PEMROGRAMAN**: WAJIB memberikan contoh kode HANYA dalam bahasa **C** dan **COBOL** untuk setiap konsep yang dijelaskan. (Jangan gunakan Python, Java, dll).
-    b. Kode harus ditulis dalam blok code markdown yang rapi.
-    c. Di bawah setiap kode, WAJIB buat blok kode terpisah dengan label "TERMINAL OUTPUT" untuk hasil eksekusinya.
-    d. **ANALISIS KODE**: Jelaskan logika kode C dan COBOL tersebut baris demi baris.
+    b. **BATASAN CONTOH**: Cukup 1 contoh program komplit untuk masing-masing bahasa (C dan COBOL) per sub-bab yang relevan.
+    c. Kode harus ditulis dalam blok code markdown yang rapi.
+    d. Di bawah setiap kode, WAJIB buat blok kode terpisah dengan label "TERMINAL OUTPUT" untuk hasil eksekusinya.
+    e. **ANALISIS KODE**: Jelaskan logika kode C dan COBOL tersebut baris demi baris secara mendalam.
   
   ${contextText ? `\nKonteks Tambahan:\n${contextText}` : ''}
   `;
@@ -259,7 +265,7 @@ export const regenerateQuiz = async (
      - **5 Soal Esai Teori**: Pertanyaan konseptual/analisis.
      - **5 Soal "Melengkapi Program" (Code Completion)**:
        - **KHUSUS MATERI IT/CODING**: Berikan snippet kode dalam soal (gunakan format markdown \`\`\`) yang rumpang/hilang sebagian.
-       - **PENTING**: Gunakan bahasa **C** atau **COBOL** untuk soal melengkapi program.
+       - **PENTING**: Gunakan bahasa **C** atau **COBOL** untuk soal melengkapi program (sesuai materi).
        - Minta siswa melengkapi baris tersebut atau menebak outputnya.
   
   IMPORTANT:
