@@ -156,8 +156,6 @@ export const generateNoteSummary = async (
   }
 
   // STEP 1: GENERATE CONTENT ONLY (Markdown Mode - Safer against truncation)
-  // Using Flash is usually safer for speed/timeout on Vercel functions, 
-  // but Pro is better for long context. We stick to Flash for speed unless specified.
   const model = "gemini-2.5-flash"; 
 
   const parts: Part[] = [];
@@ -245,20 +243,26 @@ export const regenerateQuiz = async (
   const safeContent = content.length > 30000 ? content.slice(0, 30000) + "..." : content;
 
   const prompt = `
-  Berdasarkan materi berikut, buatlah kuis evaluasi:
+  Berdasarkan materi berikut, buatlah Kuis Evaluasi yang komprehensif.
   
   MATERI:
   ${safeContent}
   
   TUGAS:
-  Buat JSON yang berisi 2 array: 'mcq_questions' (5 soal) dan 'essay_questions' (2 soal).
+  Buat file JSON yang berisi 2 array: 'mcq_questions' dan 'essay_questions'.
   
-  ATURAN KHUSUS (WAJIB):
-  1. Jika materi tentang IT/Coding:
-     - Soal Esai WAJIB berupa **STUDI KASUS KODE**.
-     - Berikan snippet kode dalam soal (gunakan markdown \`\`\`) yang rumpang atau perlu diperbaiki.
-     - Minta siswa melengkapi atau menebak output.
-  2. Output HARUS Valid JSON.
+  KOMPOSISI SOAL (WAJIB DIPATUHI):
+  1. **10 Soal Pilihan Ganda (MCQ)**: 
+     - Cakupan luas dari materi.
+  2. **10 Soal Esai (Total)** dengan rincian:
+     - **5 Soal Esai Teori**: Pertanyaan konseptual/analisis.
+     - **5 Soal "Melengkapi Program" (Code Completion)**:
+       - **KHUSUS MATERI IT/CODING**: Berikan snippet kode dalam soal (gunakan format markdown \`\`\`) yang rumpang/hilang sebagian. Minta siswa melengkapi baris tersebut atau menebak outputnya.
+       - Jika materi NON-IT: Cukup berikan total 5 esai teori saja.
+  
+  IMPORTANT:
+  - Output HARUS Valid JSON.
+  - Escape backslash dan karakter spesial dalam string JSON.
   `;
 
   try {

@@ -32,10 +32,10 @@ const CustomPre = ({ children }: any) => {
         const match = /language-(\w+)/.exec(className);
         if (match) {
             lang = match[1].toUpperCase();
-            if (lang === 'TEXT' || lang === 'PLAINTEXT') {
+            if (lang === 'TEXT' || lang === 'PLAINTEXT' || lang === 'OUTPUT') {
                 // Heuristic: if it's explicitly text/plaintext, treat as output/terminal
                 isOutput = true; 
-                lang = 'OUTPUT';
+                lang = 'TERMINAL OUTPUT';
             }
         }
     }
@@ -49,43 +49,49 @@ const CustomPre = ({ children }: any) => {
 
     if (isOutput) {
         return (
-            <div className="my-6 rounded-xl overflow-hidden bg-[#1e1e1e] border border-slate-700 shadow-lg">
-                <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-slate-600">
-                    <span className="text-xs font-mono font-bold text-green-400 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                        TERMINAL OUTPUT
-                    </span>
+            <div className="my-6 rounded-lg overflow-hidden bg-[#121212] border border-slate-700 shadow-xl mx-auto w-full max-w-full">
+                <div className="flex items-center justify-between px-4 py-1.5 bg-[#1f1f1f] border-b border-slate-700">
+                    <div className="flex items-center gap-2">
+                         <span className="text-xs font-mono font-bold text-slate-400 flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-sm bg-slate-600"></span>
+                            {lang}
+                        </span>
+                    </div>
                 </div>
-                <div className="p-4 overflow-x-auto">
-                    <pre className="font-mono text-sm leading-relaxed text-slate-300">
-                        {children}
+                <div className="p-4 overflow-x-auto custom-scrollbar">
+                    <pre className="font-mono text-sm leading-relaxed text-green-400 whitespace-pre">
+                        <code className="bg-transparent p-0 border-none text-green-400 font-mono">
+                            {children}
+                        </code>
                     </pre>
                 </div>
             </div>
         );
     }
 
+    // IDE Style for regular code
     return (
-        <div className="my-8 rounded-xl overflow-hidden bg-[#0d1117] border border-slate-800 shadow-xl group">
-            <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-slate-800/50">
-                <div className="flex items-center gap-2">
+        <div className="my-8 rounded-xl overflow-hidden bg-[#1e293b] dark:bg-[#0f172a] border border-slate-700 dark:border-slate-800 shadow-2xl group w-full max-w-full">
+            <div className="flex items-center justify-between px-4 py-3 bg-[#0f172a] dark:bg-[#020617] border-b border-slate-700 dark:border-slate-800">
+                <div className="flex items-center gap-4">
                     <div className="flex gap-1.5">
-                        <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-                        <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                        <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                        <div className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e]"></div>
+                        <div className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123]"></div>
+                        <div className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29]"></div>
                     </div>
-                    <span className="ml-3 text-xs font-mono font-bold text-slate-400 uppercase">{lang}</span>
+                    <span className="text-xs font-mono font-bold text-slate-400">{lang}</span>
                 </div>
                 <button 
                     onClick={handleCopy}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-800 transition-colors text-xs text-slate-400 hover:text-white"
+                    className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-white/10 transition-colors text-xs font-medium text-slate-400 hover:text-white"
                 >
                     {copied ? <CheckIcon /> : <CopyIcon />}
                     {copied ? 'Copied' : 'Copy'}
                 </button>
             </div>
-            <div className="p-5 overflow-x-auto">
-                <pre className="font-mono text-sm leading-loose text-slate-200">
+            <div className="p-5 overflow-x-auto custom-scrollbar bg-[#1e293b] dark:bg-[#0f172a]">
+                <pre className="font-mono text-sm leading-loose text-blue-100 whitespace-pre">
+                     {/* Pass children directly, usually contains the <code> element */}
                     {children}
                 </pre>
             </div>
@@ -622,15 +628,15 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                  rehypePlugins={[rehypeKatex]}
                                                  components={{
                                                      // Typography styling to match modern clean reading experience
-                                                     h1: ({children}) => <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 dark:text-white mb-10 pb-6 border-b border-slate-100 dark:border-slate-800 tracking-tight leading-tight">{children}</h1>,
-                                                     h2: ({children}) => <h2 className="text-2xl md:text-3xl font-bold text-slate-800 dark:text-slate-100 mt-16 mb-8 tracking-tight">{children}</h2>,
-                                                     h3: ({children}) => <h3 className="text-xl md:text-2xl font-semibold text-slate-800 dark:text-slate-200 mt-12 mb-6">{children}</h3>,
-                                                     p: ({children}) => <p className="mb-8 leading-loose text-slate-600 dark:text-slate-300 text-lg">{children}</p>,
-                                                     ul: ({children}) => <ul className="list-disc pl-8 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-8 text-lg">{children}</ul>,
-                                                     ol: ({children}) => <ol className="list-decimal pl-8 mb-8 space-y-4 text-slate-600 dark:text-slate-300 leading-8 text-lg">{children}</ol>,
-                                                     li: ({children}) => <li className="pl-2">{children}</li>,
-                                                     strong: ({children}) => <strong className="font-bold text-slate-900 dark:text-white">{children}</strong>,
-                                                     blockquote: ({children}) => <blockquote className="border-l-4 border-primary-500 pl-8 py-6 my-10 italic text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-r-2xl shadow-sm text-lg">{children}</blockquote>,
+                                                     h1: ({children}) => <h1>{children}</h1>,
+                                                     h2: ({children}) => <h2>{children}</h2>,
+                                                     h3: ({children}) => <h3>{children}</h3>,
+                                                     p: ({children}) => <p>{children}</p>,
+                                                     ul: ({children}) => <ul>{children}</ul>,
+                                                     ol: ({children}) => <ol>{children}</ol>,
+                                                     li: ({children}) => <li>{children}</li>,
+                                                     strong: ({children}) => <strong>{children}</strong>,
+                                                     blockquote: ({children}) => <blockquote>{children}</blockquote>,
                                                      code: ({node, inline, className, children, ...props}: any) => {
                                                          const match = /language-(\w+)/.exec(className || '');
                                                          if (!inline) {
@@ -638,7 +644,7 @@ export const NoteDetailPage: React.FC<NoteDetailPageProps> = ({ note, onBack, on
                                                             return <code className={className} {...props}>{children}</code>;
                                                          }
                                                          return (
-                                                            <code className="bg-slate-100 dark:bg-slate-800 text-pink-600 dark:text-pink-400 px-2 py-1 rounded-md text-sm font-mono border border-slate-200 dark:border-slate-700 mx-1" {...props}>
+                                                            <code className={className} {...props}>
                                                                 {children}
                                                             </code>
                                                          );
